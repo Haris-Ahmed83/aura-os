@@ -2,7 +2,7 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Capacitor } from '@capacitor/core';
 
 const GITHUB_REPO = 'Haris-Ahmed83/aura-os';
-const CURRENT_VERSION = '1.0.0';
+const LAST_APPLIED_KEY = 'aura_last_applied_version';
 
 export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string }> {
   if (!Capacitor.isNativePlatform()) {
@@ -19,7 +19,10 @@ export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?:
     const release = await response.json();
     const latestVersion = release.tag_name?.replace('v', '');
 
-    if (!latestVersion || latestVersion === CURRENT_VERSION) {
+    if (!latestVersion) return { hasUpdate: false };
+
+    const lastApplied = localStorage.getItem(LAST_APPLIED_KEY);
+    if (lastApplied === latestVersion) {
       return { hasUpdate: false };
     }
 
@@ -35,6 +38,7 @@ export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?:
     });
 
     await CapacitorUpdater.set({ id: downloaded.id });
+    localStorage.setItem(LAST_APPLIED_KEY, latestVersion);
 
     return { hasUpdate: true, version: latestVersion };
   } catch (error) {
