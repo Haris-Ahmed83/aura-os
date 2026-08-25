@@ -267,7 +267,7 @@ function App() {
         const { checkForUpdates } = await import('./services/updater');
         const result = await checkForUpdates();
         if (result.hasUpdate) {
-          toast.info(`Update available: v${result.version}`, { duration: 5000 });
+          toast.success(`Updated to v${result.version}! Restarting...`, { duration: 3000 });
         }
       } catch (_e) {}
     })();
