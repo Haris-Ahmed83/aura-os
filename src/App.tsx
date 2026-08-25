@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   KanbanSquare, 
@@ -37,7 +37,13 @@ import {
   Upload,
   Bot,
   MoreVertical,
-  ArrowRight
+  ArrowRight,
+  Target,
+  FileText,
+  Lock,
+  Hash,
+  ListTodo,
+  TrendingUp
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
@@ -45,6 +51,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleConnect } from './components/GoogleConnect';
 import { Toaster, toast } from 'sonner';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import WeatherWidget from './components/WeatherWidget';
+import HabitsTracker from './components/HabitsTracker';
+import ExpenseCharts from './components/ExpenseCharts';
+import QuickNotes from './components/QuickNotes';
+import ThemeManager from './components/ThemeManager';
+import AppLock from './components/AppLock';
+import { exportToPDF } from './components/pdfExport';
+import NotificationCenter, { sendBrowserNotification } from './components/NotificationCenter';
+import RecurringTracker from './components/RecurringTracker';
+import PomodoroStats from './components/PomodoroStats';
 import './index.css';
 
 // Types
@@ -106,11 +122,43 @@ interface SavingsGoal {
 
 interface AppSettings {
   displayName: string;
-  theme: 'dark' | 'midnight' | 'ocean';
+  theme: 'dark' | 'midnight' | 'ocean' | 'light' | 'auto';
   notifications: boolean;
   autoSave: boolean;
   compactMode: boolean;
   geminiApiKey: string;
+  weatherApiKey: string;
+}
+
+interface Habit {
+  id: string;
+  name: string;
+  icon: string;
+  completedDates: string[];
+}
+
+interface Note {
+  id: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+  pinned: boolean;
+}
+
+interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'reminder' | 'deadline' | 'alert' | 'info';
+  timestamp: string;
+  read: boolean;
+}
+
+interface PomodoroSession {
+  id: string;
+  startTime: string;
+  duration: number;
+  completed: boolean;
 }
 
 // Initial Data
@@ -135,6 +183,7 @@ const defaultSettings: AppSettings = {
   autoSave: true,
   compactMode: false,
   geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
+  weatherApiKey: '',
 };
 
 // ─── HARIS PERSONAL KNOWLEDGE BASE (pre-trained) ───────────────────────────
@@ -163,7 +212,7 @@ function App() {
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdSearch, setCmdSearch] = useState('');
-  const [boardCategoryFilter, setBoardCategoryFilter] = useState<'All' | 'Personal' | 'Work' | 'Learning'>('All');
+  const [boardCategoryFilter, setBoardCategoryFilter] = useState<'All' | 'Idea' | 'Active' | 'Done'>('All');
 
   // Task Selection & Menu State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -232,6 +281,15 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; hasWebUpdate: boolean; hasApkUpdate: boolean; webBundleUrl?: string; apkDownloadUrl?: string } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState('');
+  const [spotifyPlaylist, setSpotifyPlaylist] = useState('https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0');
+
+  // New Feature States
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [pomodoroSessions, setPomodoroSessions] = useState<PomodoroSession[]>([]);
+  const [isLocked, setIsLocked] = useState(true);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -263,6 +321,21 @@ function App() {
 
     const savedKnowledge = localStorage.getItem('aura_knowledge');
     if (savedKnowledge) setPersonalKnowledge(JSON.parse(savedKnowledge));
+
+    const savedHabits = localStorage.getItem('aura_habits');
+    if (savedHabits) setHabits(JSON.parse(savedHabits));
+
+    const savedNotes = localStorage.getItem('aura_notes');
+    if (savedNotes) setNotes(JSON.parse(savedNotes));
+
+    const savedNotifications = localStorage.getItem('aura_notifications');
+    if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
+
+    const savedPomodoroSessions = localStorage.getItem('aura_pomodoro_sessions');
+    if (savedPomodoroSessions) setPomodoroSessions(JSON.parse(savedPomodoroSessions));
+
+    const lockEnabled = localStorage.getItem('aura_lock_enabled');
+    if (!lockEnabled) setIsLocked(false);
   }, []);
 
   // Check for app updates on native platform
@@ -328,6 +401,10 @@ function App() {
   useEffect(() => { localStorage.setItem('aura_total_funds', totalFunds.toString()); }, [totalFunds]);
   useEffect(() => { localStorage.setItem('aura_goals', JSON.stringify(savingsGoals)); }, [savingsGoals]);
   useEffect(() => { localStorage.setItem('aura_knowledge', JSON.stringify(personalKnowledge)); }, [personalKnowledge]);
+  useEffect(() => { localStorage.setItem('aura_habits', JSON.stringify(habits)); }, [habits]);
+  useEffect(() => { localStorage.setItem('aura_notes', JSON.stringify(notes)); }, [notes]);
+  useEffect(() => { localStorage.setItem('aura_notifications', JSON.stringify(notifications)); }, [notifications]);
+  useEffect(() => { localStorage.setItem('aura_pomodoro_sessions', JSON.stringify(pomodoroSessions)); }, [pomodoroSessions]);
 
   // Apply Theme
   useEffect(() => {
@@ -635,17 +712,17 @@ function App() {
     const destItems = source.droppableId === destination.droppableId ? sourceItems : [...tasks[destination.droppableId as keyof TaskColumns]];
     const [removed] = sourceItems.splice(source.index, 1);
 
-    // Update tag based on destination
-    if (destination.droppableId === 'inProgress') { removed.type = 'Active'; removed.color = 'purple'; }
-    else if (destination.droppableId === 'completed') { removed.type = 'Done'; removed.color = 'green'; }
-    else if (destination.droppableId === 'deleted') { removed.type = 'Deleted'; removed.color = 'red'; }
-    else { removed.type = 'Idea'; removed.color = 'blue'; }
+    const updatedTask = { ...removed };
+    if (destination.droppableId === 'inProgress') { updatedTask.type = 'Active'; updatedTask.color = 'purple'; }
+    else if (destination.droppableId === 'completed') { updatedTask.type = 'Done'; updatedTask.color = 'green'; }
+    else if (destination.droppableId === 'deleted') { updatedTask.type = 'Deleted'; updatedTask.color = 'red'; }
+    else { updatedTask.type = 'Idea'; updatedTask.color = 'blue'; }
 
     if (source.droppableId === destination.droppableId) {
-      sourceItems.splice(destination.index, 0, removed);
+      sourceItems.splice(destination.index, 0, updatedTask);
       setTasks({ ...tasks, [source.droppableId]: sourceItems });
     } else {
-      destItems.splice(destination.index, 0, removed);
+      destItems.splice(destination.index, 0, updatedTask);
       setTasks({ ...tasks, [source.droppableId]: sourceItems, [destination.droppableId]: destItems });
     }
   };
@@ -797,7 +874,10 @@ function App() {
         settings,
         expenses,
         monthlyIncome,
-        savingsGoals
+        savingsGoals,
+        totalFunds,
+        personalKnowledge,
+        aiChatMessages,
       };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -828,6 +908,9 @@ function App() {
         if (data.expenses) setExpenses(data.expenses);
         if (data.monthlyIncome !== undefined) setMonthlyIncome(data.monthlyIncome);
         if (data.savingsGoals) setSavingsGoals(data.savingsGoals);
+        if (data.totalFunds !== undefined) setTotalFunds(data.totalFunds);
+        if (data.personalKnowledge) setPersonalKnowledge(data.personalKnowledge);
+        if (data.aiChatMessages) setAiChatMessages(data.aiChatMessages);
         toast.success('Data imported successfully! Reloading...');
         setTimeout(() => window.location.reload(), 1500);
       } catch (error) {
@@ -1133,16 +1216,22 @@ Always prefer calling functions over just talking about them.`,
             } else if (call.name === 'delete_task') {
               const keyword = args.title_keyword.toLowerCase();
               setTasks(prev => {
-                const matched = [...prev.todo, ...prev.inProgress, ...prev.completed].find(t => t.title.toLowerCase().includes(keyword));
+                const allCols: (keyof TaskColumns)[] = ['todo', 'inProgress', 'completed'];
+                let matched: Task | undefined;
+                let fromCol: keyof TaskColumns = 'todo';
+                for (const col of allCols) {
+                  const found = prev[col].find(t => t.title.toLowerCase().includes(keyword));
+                  if (found) { matched = found; fromCol = col; break; }
+                }
                 if (!matched) return prev;
+                const movedTask = { ...matched, type: 'Deleted', color: 'red' };
                 return {
-                  todo: prev.todo.filter(t => t.id !== matched.id),
-                  inProgress: prev.inProgress.filter(t => t.id !== matched.id),
-                  completed: prev.completed.filter(t => t.id !== matched.id),
-                  deleted: prev.deleted
+                  ...prev,
+                  [fromCol]: prev[fromCol].filter(t => t.id !== matched!.id),
+                  deleted: [...prev.deleted, movedTask],
                 };
               });
-              toast.success(`Task deleted!`);
+              toast.success(`Task moved to Trash!`);
               actionsDone.push(`🗑️ Task "${args.title_keyword}" delete ho gaya!`);
             } else if (call.name === 'get_my_info') {
               actionsDone.push(`📋 Haris ka profile:\n${Object.entries(mergedKB).map(([k,v]) => `${k}: ${v}`).join('\n')}`);
@@ -1420,7 +1509,9 @@ Always prefer calling functions over just talking about them.`,
   };
 
   return (
-    <div className="app-container" ref={containerRef}>
+    <>
+      {isLocked && <AppLock onUnlock={() => setIsLocked(false)} />}
+      <div className="app-container" ref={containerRef}>
       
       {/* Command Palette */}
       <AnimatePresence>
@@ -1492,8 +1583,10 @@ Always prefer calling functions over just talking about them.`,
           {[
             { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
             { id: 'board', icon: <KanbanSquare size={20} />, label: 'Ideas' },
+            { id: 'habits', icon: <Target size={20} />, label: 'Habits' },
             { id: 'schedule', icon: <Calendar size={20} />, label: 'Schedule' },
             { id: 'finance', icon: <Wallet size={20} />, label: 'Finance' },
+            { id: 'notes', icon: <FileText size={20} />, label: 'Notes' },
             { id: 'settings', icon: <SettingsIcon size={20} />, label: 'Settings' },
           ].map(item => (
             <button key={item.id} className={`nav-item ${activeTab === item.id ? 'active' : ''}`} onClick={() => setActiveTab(item.id)}>
@@ -1543,9 +1636,11 @@ Always prefer calling functions over just talking about them.`,
               <Plus size={18} color="var(--accent)" />
             </button>
 
-            <button className="icon-btn" title="Notifications">
-              <Bell size={18} color="var(--accent)" />
-            </button>
+            <NotificationCenter
+              notifications={notifications}
+              onDismiss={(id) => setNotifications(prev => prev.filter(n => n.id !== id))}
+              onClearAll={() => setNotifications([])}
+            />
           </div>
         </header>
 
@@ -1864,31 +1959,7 @@ Always prefer calling functions over just talking about them.`,
                   </div>
 
                   {/* Weather Widget */}
-                  <div className="glass-panel" style={{ padding: '24px', position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ position: 'absolute', top: '-20px', right: '-20px', opacity: 0.06, fontSize: '8rem', lineHeight: 1 }}>☀️</div>
-                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--text-secondary)' }}>
-                      <CloudSun size={18} color="var(--accent)" /> Weather
-                    </h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
-                      <span style={{ fontSize: '3rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text-1)' }}>28°</span>
-                      <div>
-                        <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>Partly Cloudy</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Supply, Abbottabad, PK</div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '16px' }}>
-                      {[
-                        { label: 'Humidity', value: '62%' },
-                        { label: 'Wind', value: '12 km/h' },
-                        { label: 'Feels Like', value: '31°' },
-                      ].map(item => (
-                        <div key={item.label} style={{ flex: 1, textAlign: 'center', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginBottom: '2px' }}>{item.label}</div>
-                          <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <WeatherWidget apiKey={settings.weatherApiKey} />
 
                   {/* Spotify Embed Widget */}
                   <div className="glass-panel" style={{ padding: '24px' }}>
@@ -1897,17 +1968,18 @@ Always prefer calling functions over just talking about them.`,
                     </h3>
                     <iframe
                       style={{ borderRadius: '12px', border: 'none', width: '100%', height: '152px' }}
-                      src="https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0"
+                      src={spotifyPlaylist}
                       allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                       loading="lazy"
                     />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
                       {[
-                        { label: 'Lo-fi Beats', src: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0' },
-                        { label: 'Deep Focus', src: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0' },
-                        { label: 'Classical', src: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWWEJlAGA9gs0?utm_source=generator&theme=0' },
+                        { label: 'Lo-fi Beats', id: '37i9dQZF1DWZeKCadgRdKQ' },
+                        { label: 'Deep Focus', id: '37i9dQZF1DWStqbJZ9G4cQ' },
+                        { label: 'Classical', id: '37i9dQZF1DWWEJlAGA9gs0' },
+                        { label: 'Chill Vibes', id: '37i9dQZF1DWZJD6lG5Tcry' },
                       ].map(q => (
-                        <button key={q.label} style={{ padding: '5px 12px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.75rem' }}>
+                        <button key={q.label} onClick={() => setSpotifyPlaylist(`https://open.spotify.com/embed/playlist/${q.id}?utm_source=generator&theme=0`)} style={{ padding: '5px 12px', borderRadius: '20px', border: spotifyPlaylist.includes(q.id) ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)', background: spotifyPlaylist.includes(q.id) ? 'rgba(212,175,55,0.15)' : 'transparent', color: spotifyPlaylist.includes(q.id) ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.75rem' }}>
                           {q.label}
                         </button>
                       ))}
@@ -1937,9 +2009,9 @@ Always prefer calling functions over just talking about them.`,
                   </div>
                 </div>
 
-                {/* Filter Pills — All (gold active), Personal, Work, Learning */}
+                {/* Filter Pills — All, Idea, Active, Done */}
                 <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '2px 4px 6px', scrollbarWidth: 'none' }}>
-                  {(['All', 'Personal', 'Work', 'Learning'] as const).map(cat => (
+                  {(['All', 'Idea', 'Active', 'Done'] as const).map(cat => (
                     <button
                       key={cat}
                       onClick={() => setBoardCategoryFilter(cat)}
@@ -2181,25 +2253,6 @@ Always prefer calling functions over just talking about them.`,
                   </div>
                 </div>
 
-                {/* Appearance Section */}
-                <div className="settings-section glass-panel" style={{ padding: '24px', marginBottom: '16px' }}>
-                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><Palette size={18} /> Appearance</h3>
-                  <div className="settings-row">
-                    <label>Theme</label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      {[
-                        { id: 'dark', label: 'Dark', icon: <Moon size={14} /> },
-                        { id: 'midnight', label: 'Midnight', icon: <Sparkles size={14} /> },
-                        { id: 'ocean', label: 'Ocean', icon: <Sun size={14} /> },
-                      ].map(theme => (
-                        <button key={theme.id} onClick={() => setSettings({ ...settings, theme: theme.id as AppSettings['theme'] })} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: settings.theme === theme.id ? '2px solid var(--accent-blue)' : '1px solid rgba(255,255,255,0.1)', background: settings.theme === theme.id ? 'rgba(59,130,246,0.1)' : 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem' }}>
-                          {theme.icon} {theme.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
                 {/* AI Integration Section */}
                 <div className="settings-section glass-panel" style={{ padding: '24px', marginBottom: '16px' }}>
                   <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><Bot size={18} /> AI Integration</h3>
@@ -2237,6 +2290,63 @@ Always prefer calling functions over just talking about them.`,
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="btn-primary" onClick={handleSaveSettings} style={{ padding: '12px 32px' }}>
                   {settingsSaved ? <><CheckCircle2 size={16} /> Saved!</> : <><Save size={16} /> Save Settings</>}
                 </motion.button>
+
+                {/* Weather API Key */}
+                <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><CloudSun size={18} /> Weather API</h3>
+                  <div className="settings-row">
+                    <div>
+                      <label>OpenWeatherMap API Key</label>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Get free key from openweathermap.org to show live weather.</p>
+                    </div>
+                    <input type="password" placeholder="Paste your API key..." value={settings.weatherApiKey || ''} onChange={(e) => setSettings({ ...settings, weatherApiKey: e.target.value })} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '10px 14px', borderRadius: '8px', outline: 'none', fontFamily: 'Inter, sans-serif', width: '250px', maxWidth: '100%' }} />
+                  </div>
+                </div>
+
+                {/* Theme Manager */}
+                <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
+                  <ThemeManager currentTheme={settings.theme} onThemeChange={(theme) => setSettings({ ...settings, theme: theme as AppSettings['theme'] })} />
+                </div>
+
+                {/* App Lock */}
+                <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><Lock size={18} /> App Lock</h3>
+                  <div className="settings-row">
+                    <div>
+                      <label>Privacy Lock</label>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Require PIN to access the app</p>
+                    </div>
+                    <button className="btn-secondary" onClick={() => {
+                      localStorage.removeItem('aura_lock_enabled');
+                      localStorage.removeItem('aura_lock_hash');
+                      toast.success('App lock reset. Reload to set new PIN.');
+                    }}>
+                      <Lock size={14} /> Reset PIN
+                    </button>
+                  </div>
+                </div>
+
+                {/* PDF Export */}
+                <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><FileText size={18} /> PDF Export</h3>
+                  <div className="settings-row">
+                    <div>
+                      <label>Export to PDF</label>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Export tasks, journal, and notes as a printable document.</p>
+                    </div>
+                    <button className="btn-secondary" onClick={() => {
+                      const sections = [
+                        { title: 'Tasks', content: [...tasks.todo, ...tasks.inProgress, ...tasks.completed].map(t => `- ${t.title} (${t.type})`).join('\n') || 'No tasks' },
+                        { title: 'Journal Entries', content: journalEntries.slice(0, 10).map(j => `- [${j.mood}] ${j.content.substring(0, 100)}`).join('\n') || 'No entries' },
+                        { title: 'Notes', content: notes.map(n => `## ${n.title}\n${n.content}`).join('\n\n') || 'No notes' },
+                        { title: 'Finance Summary', content: `Monthly Income: Rs ${monthlyIncome}\nTotal Funds: Rs ${totalFunds}\nExpenses: ${expenses.length} entries` },
+                      ];
+                      exportToPDF('Aura OS Export', sections);
+                    }}>
+                      <Download size={14} /> Export PDF
+                    </button>
+                  </div>
+                </div>
 
                 {/* Data Management */}
                 <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
@@ -2333,13 +2443,16 @@ Always prefer calling functions over just talking about them.`,
                     <div style={{ display: 'flex', gap: '12px' }}>
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="btn-primary" onClick={() => {
                         if (pomodoroRunning) {
-                          clearInterval(pomodoroRef.current!);
+                          if (pomodoroRef.current) clearInterval(pomodoroRef.current);
                           setPomodoroRunning(false);
                         } else {
                           setPomodoroRunning(true);
                           pomodoroRef.current = setInterval(() => {
                             setPomodoroTime(prev => {
-                              if (prev <= 1) { clearInterval(pomodoroRef.current!); setPomodoroRunning(false); return 25 * 60; }
+                              if (prev <= 1) { if (pomodoroRef.current) clearInterval(pomodoroRef.current); setPomodoroRunning(false);
+                                setPomodoroSessions(prev => [...prev, { id: Date.now().toString(), startTime: new Date(Date.now() - 25 * 60 * 1000).toISOString(), duration: 25 * 60, completed: true }]);
+                                toast.success('Pomodoro session completed!');
+                                return 25 * 60; }
                               return prev - 1;
                             });
                           }, 1000);
@@ -2348,7 +2461,7 @@ Always prefer calling functions over just talking about them.`,
                         {pomodoroRunning ? '⏸ Pause' : '▶ Start Focus'}
                       </motion.button>
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="btn-secondary" onClick={() => {
-                        clearInterval(pomodoroRef.current!);
+                        if (pomodoroRef.current) clearInterval(pomodoroRef.current);
                         setPomodoroRunning(false);
                         setPomodoroTime(25 * 60);
                       }}>
@@ -2357,13 +2470,43 @@ Always prefer calling functions over just talking about them.`,
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {[5, 15, 25, 45].map(mins => (
-                        <button key={mins} onClick={() => { clearInterval(pomodoroRef.current!); setPomodoroRunning(false); setPomodoroTime(mins * 60); }} style={{ padding: '6px 14px', borderRadius: '20px', border: pomodoroTime === mins * 60 ? '1px solid var(--accent-blue)' : '1px solid rgba(255,255,255,0.1)', background: pomodoroTime === mins * 60 ? 'rgba(59,130,246,0.15)' : 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                        <button key={mins} onClick={() => { if (pomodoroRef.current) clearInterval(pomodoroRef.current); setPomodoroRunning(false); setPomodoroTime(mins * 60); }} style={{ padding: '6px 14px', borderRadius: '20px', border: pomodoroTime === mins * 60 ? '1px solid var(--accent-blue)' : '1px solid rgba(255,255,255,0.1)', background: pomodoroTime === mins * 60 ? 'rgba(59,130,246,0.15)' : 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
                           {mins}m
                         </button>
                       ))}
                     </div>
                   </div>
                 </div>
+
+                {/* Pomodoro Stats */}
+                <div style={{ marginTop: '24px' }}>
+                  <PomodoroStats sessions={pomodoroSessions} />
+                </div>
+              </motion.div>
+            )}
+
+            {/* ===== HABITS ===== */}
+            {activeTab === 'habits' && (
+              <motion.div key="habits" variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition} style={{ padding: '32px' }}>
+                <HabitsTracker
+                  habits={habits}
+                  onToggle={(habitId, date) => {
+                    setHabits(prev => prev.map(h => {
+                      if (h.id !== habitId) return h;
+                      const completed = h.completedDates.includes(date);
+                      return { ...h, completedDates: completed ? h.completedDates.filter(d => d !== date) : [...h.completedDates, date] };
+                    }));
+                  }}
+                  onAdd={(name, icon) => setHabits(prev => [...prev, { id: Date.now().toString(), name, icon, completedDates: [] }])}
+                  onDelete={(habitId) => setHabits(prev => prev.filter(h => h.id !== habitId))}
+                />
+              </motion.div>
+            )}
+
+            {/* ===== NOTES ===== */}
+            {activeTab === 'notes' && (
+              <motion.div key="notes" variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition} style={{ padding: '32px', height: '100%' }}>
+                <QuickNotes notes={notes} onSave={setNotes} />
               </motion.div>
             )}
 
@@ -2603,36 +2746,6 @@ Always prefer calling functions over just talking about them.`,
                   </div>
                 </div>
 
-                {/* Add Goal Modal */}
-                <AnimatePresence>
-                  {showAddGoal && (
-                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddGoal(false)}>
-                      <motion.div className="modal-content" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()}>
-                        <h3 style={{ marginBottom: '24px', fontSize: '1.2rem' }}>New Savings Goal</h3>
-                        <form onSubmit={e => {
-                          e.preventDefault();
-                          if (!newGoal.name || !newGoal.targetAmount) return;
-                          setSavingsGoals(prev => [...prev, { id: Date.now().toString(), name: newGoal.name, targetAmount: parseFloat(newGoal.targetAmount), savedAmount: 0, color: newGoal.color }]);
-                          setNewGoal({ name: '', targetAmount: '', color: '#3b82f6' });
-                          setShowAddGoal(false);
-                        }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                          <input className="form-input" placeholder="What do you want to buy?" value={newGoal.name} onChange={e => setNewGoal({ ...newGoal, name: e.target.value })} required />
-                          <input className="form-input" type="number" placeholder="Target Amount (Rs)" value={newGoal.targetAmount} onChange={e => setNewGoal({ ...newGoal, targetAmount: e.target.value })} required />
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            {['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'].map(c => (
-                              <div key={c} onClick={() => setNewGoal({ ...newGoal, color: c })} style={{ width: '28px', height: '28px', borderRadius: '50%', background: c, border: newGoal.color === c ? '3px solid white' : '2px solid transparent', cursor: 'pointer', transition: 'border 0.15s' }} />
-                            ))}
-                          </div>
-                          <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                            <motion.button type="submit" whileTap={{ scale: 0.95 }} className="btn-primary" style={{ flex: 1 }}>Create Goal</motion.button>
-                            <button type="button" className="btn-secondary" onClick={() => setShowAddGoal(false)} style={{ flex: 1 }}>Cancel</button>
-                          </div>
-                        </form>
-                      </motion.div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 {/* Add Funds Modal */}
                 <AnimatePresence>
                   {showAddFunds && (
@@ -2674,11 +2787,12 @@ Always prefer calling functions over just talking about them.`,
                         <form onSubmit={e => {
                           e.preventDefault();
                           if (!newGoal.name || !newGoal.targetAmount) return;
+                          const goalName = newGoal.name;
                           const target = parseFloat(newGoal.targetAmount);
-                          setSavingsGoals(prev => [...prev, { id: Date.now().toString(), name: newGoal.name, targetAmount: target, savedAmount: 0, color: newGoal.color }]);
+                          setSavingsGoals(prev => [...prev, { id: Date.now().toString(), name: goalName, targetAmount: target, savedAmount: 0, color: newGoal.color }]);
                           setNewGoal({ name: '', targetAmount: '', color: '#3b82f6' });
                           setShowAddGoal(false);
-                          toast.success(`Bank Vault Goal Created: "${newGoal.name}"`);
+                          toast.success(`Vault Goal Created: "${goalName}"`);
                         }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                           <div>
                             <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Goal Name</label>
@@ -2758,6 +2872,19 @@ Always prefer calling functions over just talking about them.`,
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Expense Charts */}
+                <div style={{ marginTop: '24px' }}>
+                  <ExpenseCharts expenses={expenses} monthlyIncome={monthlyIncome} />
+                </div>
+
+                {/* Recurring Tracker */}
+                <div style={{ marginTop: '24px' }}>
+                  <RecurringTracker expenses={expenses} onMarkPaid={(expenseId) => {
+                    setExpenses(prev => prev.map(e => e.id === expenseId ? { ...e, date: new Date().toISOString().split('T')[0] } : e));
+                    toast.success('Recurring expense marked as paid!');
+                  }} />
+                </div>
 
               </motion.div>
             )}
@@ -2997,6 +3124,7 @@ Always prefer calling functions over just talking about them.`,
 
       <Toaster theme="dark" richColors position="bottom-right" />
     </div>
+    </>
   );
 }
 
