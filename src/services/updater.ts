@@ -1,15 +1,22 @@
-import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Capacitor } from '@capacitor/core';
 
 const GITHUB_REPO = 'Haris-Ahmed83/aura-os';
-const LAST_APPLIED_KEY = 'aura_last_applied_version';
+const LAST_CHECK_KEY = 'aura_last_update_check';
+const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
-export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string }> {
+export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; downloadUrl?: string }> {
   if (!Capacitor.isNativePlatform()) {
     return { hasUpdate: false };
   }
 
   try {
+    const lastCheck = localStorage.getItem(LAST_CHECK_KEY);
+    if (lastCheck && (Date.now() - Number(lastCheck)) < CHECK_INTERVAL) {
+      return { hasUpdate: false };
+    }
+
+    localStorage.setItem(LAST_CHECK_KEY, Date.now().toString());
+
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
     );
@@ -21,26 +28,17 @@ export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?:
 
     if (!latestVersion) return { hasUpdate: false };
 
-    const lastApplied = localStorage.getItem(LAST_APPLIED_KEY);
-    if (lastApplied === latestVersion) {
-      return { hasUpdate: false };
-    }
-
     const bundleAsset = release.assets?.find((a: any) =>
       a.name === 'web-bundle.zip'
     );
 
     if (!bundleAsset) return { hasUpdate: false };
 
-    const downloaded = await CapacitorUpdater.download({
-      url: bundleAsset.browser_download_url,
+    return {
+      hasUpdate: true,
       version: latestVersion,
-    });
-
-    await CapacitorUpdater.set({ id: downloaded.id });
-    localStorage.setItem(LAST_APPLIED_KEY, latestVersion);
-
-    return { hasUpdate: true, version: latestVersion };
+      downloadUrl: bundleAsset.browser_download_url
+    };
   } catch (error) {
     console.error('Update check failed:', error);
     return { hasUpdate: false };
