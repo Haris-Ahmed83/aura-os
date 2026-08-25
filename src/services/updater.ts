@@ -1,22 +1,15 @@
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Capacitor } from '@capacitor/core';
 
 const GITHUB_REPO = 'Haris-Ahmed83/aura-os';
-const LAST_CHECK_KEY = 'aura_last_update_check';
-const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
+const APPLIED_VERSION_KEY = 'aura_applied_version';
 
-export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; downloadUrl?: string }> {
+export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string }> {
   if (!Capacitor.isNativePlatform()) {
     return { hasUpdate: false };
   }
 
   try {
-    const lastCheck = localStorage.getItem(LAST_CHECK_KEY);
-    if (lastCheck && (Date.now() - Number(lastCheck)) < CHECK_INTERVAL) {
-      return { hasUpdate: false };
-    }
-
-    localStorage.setItem(LAST_CHECK_KEY, Date.now().toString());
-
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
     );
@@ -28,17 +21,29 @@ export async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?:
 
     if (!latestVersion) return { hasUpdate: false };
 
+    const lastApplied = localStorage.getItem(APPLIED_VERSION_KEY);
+    if (lastApplied === latestVersion) {
+      return { hasUpdate: false };
+    }
+
     const bundleAsset = release.assets?.find((a: any) =>
       a.name === 'web-bundle.zip'
     );
 
     if (!bundleAsset) return { hasUpdate: false };
 
-    return {
-      hasUpdate: true,
+    const downloaded = await CapacitorUpdater.download({
+      url: bundleAsset.browser_download_url,
       version: latestVersion,
-      downloadUrl: bundleAsset.browser_download_url
-    };
+    });
+
+    localStorage.setItem(APPLIED_VERSION_KEY, latestVersion);
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    await CapacitorUpdater.set({ id: downloaded.id });
+
+    return { hasUpdate: true, version: latestVersion };
   } catch (error) {
     console.error('Update check failed:', error);
     return { hasUpdate: false };
