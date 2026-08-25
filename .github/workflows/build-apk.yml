@@ -65,12 +65,11 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: Release v${{ steps.version.outputs.VERSION }}
+          token: ${{ inputs.github_token || secrets.VITE_GITHUB_TOKEN }}
           files: |
             web-bundle.zip
             android/app/build/outputs/apk/debug/app-debug.apk
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ inputs.github_token || secrets.VITE_GITHUB_TOKEN }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
