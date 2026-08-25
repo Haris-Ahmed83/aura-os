@@ -228,6 +228,11 @@ function App() {
   // Personal Knowledge Base State
   const [personalKnowledge, setPersonalKnowledge] = useState<Record<string, string>>({});
 
+  // Update state
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; hasWebUpdate: boolean; hasApkUpdate: boolean; webBundleUrl?: string; apkDownloadUrl?: string } | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState('');
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Load all data from localStorage
@@ -266,30 +271,45 @@ function App() {
       try {
         const { checkForUpdates } = await import('./services/updater');
         const result = await checkForUpdates();
-        if (result.hasWebUpdate) {
-          toast.success(`App updated to v${result.version}! Restarting...`, { duration: 3000 });
-        }
-        if (result.hasApkUpdate && result.apkDownloadUrl) {
-          toast.info(`New APK available: v${result.version}`, {
-            duration: 10000,
-            action: {
-              label: 'Download',
-              onClick: async () => {
-                const { downloadAndInstallApk } = await import('./services/updater');
-                toast.loading('Downloading APK...');
-                try {
-                  await downloadAndInstallApk(result.apkDownloadUrl!, result.version!);
-                  toast.success('APK downloaded! Install it when prompted.');
-                } catch (_e) {
-                  toast.error('Download failed. Try again.');
-                }
-              }
-            }
+        if ((result.hasWebUpdate || result.hasApkUpdate) && result.version) {
+          setUpdateInfo({
+            version: result.version,
+            hasWebUpdate: result.hasWebUpdate,
+            hasApkUpdate: result.hasApkUpdate,
+            webBundleUrl: result.webBundleUrl,
+            apkDownloadUrl: result.apkDownloadUrl,
           });
         }
       } catch (_e) {}
     })();
   }, []);
+
+  const handleApplyWebUpdate = async () => {
+    if (!updateInfo?.webBundleUrl || !updateInfo?.version) return;
+    setUpdating(true);
+    setUpdateProgress('Downloading update...');
+    try {
+      const { applyWebUpdate } = await import('./services/updater');
+      await applyWebUpdate(updateInfo.webBundleUrl, updateInfo.version);
+      setUpdateProgress('Update applied! Reloading...');
+      setTimeout(() => { window.location.reload(); }, 1500);
+    } catch (_e) {
+      setUpdateProgress('');
+      setUpdating(false);
+      toast.error('Update failed. Try again.');
+    }
+  };
+
+  const handleDownloadApk = async () => {
+    if (!updateInfo?.apkDownloadUrl || !updateInfo?.version) return;
+    try {
+      const { downloadAndInstallApk } = await import('./services/updater');
+      await downloadAndInstallApk(updateInfo.apkDownloadUrl, updateInfo.version);
+      toast.success('APK download started! Open notification to install.');
+    } catch (_e) {
+      toast.error('Download failed. Try again.');
+    }
+  };
 
   // Auto-save all data
   useEffect(() => { localStorage.setItem('aura_tasks', JSON.stringify(tasks)); }, [tasks]);
@@ -1528,6 +1548,87 @@ Always prefer calling functions over just talking about them.`,
             </button>
           </div>
         </header>
+
+        {/* Update Banner */}
+        {updateInfo && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))',
+            border: '1px solid rgba(99,102,241,0.3)',
+            borderRadius: 12,
+            padding: '12px 16px',
+            margin: '12px 16px 0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--accent)' }}>
+                {updating ? `Updating to v${updateInfo.version}...` : `Update available: v${updateInfo.version}`}
+              </div>
+              {updateProgress && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{updateProgress}</div>}
+              {!updating && !updateProgress && (
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {updateInfo.hasWebUpdate && updateInfo.hasApkUpdate && 'App & web updates available'}
+                  {updateInfo.hasWebUpdate && !updateInfo.hasApkUpdate && 'Web update available'}
+                  {!updateInfo.hasWebUpdate && updateInfo.hasApkUpdate && 'App update available'}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {updateInfo.hasWebUpdate && (
+                <button
+                  onClick={handleApplyWebUpdate}
+                  disabled={updating}
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: updating ? 'not-allowed' : 'pointer',
+                    opacity: updating ? 0.6 : 1,
+                  }}
+                >
+                  {updating ? 'Updating...' : 'Update'}
+                </button>
+              )}
+              {updateInfo.hasApkUpdate && (
+                <button
+                  onClick={handleDownloadApk}
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Download APK
+                </button>
+              )}
+              <button
+                onClick={() => setUpdateInfo(null)}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Quick Add Idea Modal */}
         <AnimatePresence>
