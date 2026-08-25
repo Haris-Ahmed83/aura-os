@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Capacitor Browser plugin
+        run: npm install @capacitor/browser @capacitor/app
+
       - name: Build web app
         run: npx vite build
 
