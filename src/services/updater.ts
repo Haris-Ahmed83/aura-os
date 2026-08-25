@@ -5,12 +5,18 @@ import { Directory, Filesystem } from '@capacitor/filesystem';
 const GITHUB_REPO = 'Haris-Ahmed83/aura-os';
 const APPLIED_VERSION_KEY = 'aura_applied_version';
 const APK_VERSION_KEY = 'aura_apk_version';
+const CURRENT_VERSION_KEY = 'aura_current_version';
 
 export interface UpdateInfo {
   hasWebUpdate: boolean;
   hasApkUpdate: boolean;
   version?: string;
   apkDownloadUrl?: string;
+  webBundleUrl?: string;
+}
+
+export function getCurrentVersion(): string {
+  return localStorage.getItem(CURRENT_VERSION_KEY) || '0';
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
@@ -36,18 +42,8 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     if (lastWebApplied !== latestVersion) {
       const bundleAsset = release.assets?.find((a: any) => a.name === 'web-bundle.zip');
       if (bundleAsset) {
-        try {
-          const downloaded = await CapacitorUpdater.download({
-            url: bundleAsset.browser_download_url,
-            version: latestVersion,
-          });
-          localStorage.setItem(APPLIED_VERSION_KEY, latestVersion);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          await CapacitorUpdater.set({ id: downloaded.id });
-          result.hasWebUpdate = true;
-        } catch (e) {
-          console.error('Web update failed:', e);
-        }
+        result.hasWebUpdate = true;
+        result.webBundleUrl = bundleAsset.browser_download_url;
       }
     }
 
@@ -67,9 +63,11 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
   }
 }
 
-export async function downloadAndInstallApk(url: string, version: string): Promise<void> {
+export async function applyWebUpdate(url: string, version: string): Promise<boolean> {
   try {
     const response = await fetch(url);
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+
     const blob = await response.blob();
     const reader = new FileReader();
 
@@ -77,7 +75,7 @@ export async function downloadAndInstallApk(url: string, version: string): Promi
       reader.onload = async () => {
         try {
           const base64Data = (reader.result as string).split(',')[1];
-          const fileName = `AuraOS-${version}.apk`;
+          const fileName = `web-bundle-${version}.zip`;
 
           await Filesystem.writeFile({
             path: fileName,
@@ -90,19 +88,35 @@ export async function downloadAndInstallApk(url: string, version: string): Promi
             directory: Directory.Cache,
           });
 
-          localStorage.setItem(APK_VERSION_KEY, version);
+          const downloaded = await CapacitorUpdater.download({
+            url: fileUri.uri,
+            version: version,
+          });
 
-          const { Browser } = await import('@capacitor/browser');
-          await Browser.open({ url: fileUri.uri });
+          localStorage.setItem(APPLIED_VERSION_KEY, version);
+          localStorage.setItem(CURRENT_VERSION_KEY, version);
+          await CapacitorUpdater.set({ id: downloaded.id });
 
-          resolve();
+          resolve(true);
         } catch (e) {
+          console.error('Web apply failed:', e);
           reject(e);
         }
       };
-      reader.onerror = reject;
+      reader.onerror = () => reject(new Error('FileReader failed'));
       reader.readAsDataURL(blob);
     });
+  } catch (error) {
+    console.error('Web update download failed:', error);
+    throw error;
+  }
+}
+
+export async function downloadAndInstallApk(url: string, version: string): Promise<void> {
+  try {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.open({ url });
+    localStorage.setItem(APK_VERSION_KEY, version);
   } catch (error) {
     console.error('APK download failed:', error);
     throw error;
