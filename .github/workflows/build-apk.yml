@@ -4,13 +4,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: write
+    inputs:
+      gemini_key:
+        description: 'Gemini API Key'
+        required: true
+        type: string
+      github_token:
+        description: 'GitHub PAT'
+        required: true
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_GEMINI_API_KEY: ${{ inputs.gemini_key || secrets.VITE_GEMINI_API_KEY }}
+      VITE_GITHUB_TOKEN: ${{ inputs.github_token || secrets.VITE_GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,9 +40,6 @@ jobs:
 
       - name: Build web app
         run: npx vite build
-        env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
-          VITE_GITHUB_TOKEN: ${{ secrets.VITE_GITHUB_TOKEN }}
 
       - name: Zip web bundle
         run: cd dist && zip -r ../web-bundle.zip . && cd ..
