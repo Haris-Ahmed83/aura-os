@@ -266,8 +266,26 @@ function App() {
       try {
         const { checkForUpdates } = await import('./services/updater');
         const result = await checkForUpdates();
-        if (result.hasUpdate) {
-          toast.success(`Updated to v${result.version}! Restarting...`, { duration: 3000 });
+        if (result.hasWebUpdate) {
+          toast.success(`App updated to v${result.version}! Restarting...`, { duration: 3000 });
+        }
+        if (result.hasApkUpdate && result.apkDownloadUrl) {
+          toast.info(`New APK available: v${result.version}`, {
+            duration: 10000,
+            action: {
+              label: 'Download',
+              onClick: async () => {
+                const { downloadAndInstallApk } = await import('./services/updater');
+                toast.loading('Downloading APK...');
+                try {
+                  await downloadAndInstallApk(result.apkDownloadUrl!, result.version!);
+                  toast.success('APK downloaded! Install it when prompted.');
+                } catch (_e) {
+                  toast.error('Download failed. Try again.');
+                }
+              }
+            }
+          });
         }
       } catch (_e) {}
     })();
