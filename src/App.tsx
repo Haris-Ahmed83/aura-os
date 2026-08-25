@@ -260,6 +260,19 @@ function App() {
     if (savedKnowledge) setPersonalKnowledge(JSON.parse(savedKnowledge));
   }, []);
 
+  // Check for app updates on native platform
+  useEffect(() => {
+    (async () => {
+      try {
+        const { checkForUpdates } = await import('./services/updater');
+        const result = await checkForUpdates();
+        if (result.hasUpdate) {
+          toast.success(`App updated to v${result.version}! Restart to apply.`);
+        }
+      } catch (_e) {}
+    })();
+  }, []);
+
   // Auto-save all data
   useEffect(() => { localStorage.setItem('aura_tasks', JSON.stringify(tasks)); }, [tasks]);
   useEffect(() => { localStorage.setItem('aura_events', JSON.stringify(scheduleEvents)); }, [scheduleEvents]);
