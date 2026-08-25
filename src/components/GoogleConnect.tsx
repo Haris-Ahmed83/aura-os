@@ -4,7 +4,6 @@ import { Calendar as CalendarIcon, Mail, CheckCircle2, LogOut } from 'lucide-rea
 
 const CLIENT_ID = "93524226912-iv57sq9ts1i1a6a0rane5o4c19ujacn5.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly";
-const REDIRECT_URI = "com.aura.app://callback";
 
 export const GoogleConnect: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -76,7 +75,7 @@ export const GoogleConnect: React.FC = () => {
   const login = async () => {
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth` +
       `?client_id=${CLIENT_ID}` +
-      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&redirect_uri=${encodeURIComponent('https://localhost')}` +
       `&response_type=token` +
       `&scope=${encodeURIComponent(SCOPES)}` +
       `&prompt=select_account`;
@@ -88,22 +87,36 @@ export const GoogleConnect: React.FC = () => {
       const { Browser } = await import('@capacitor/browser');
       const { App } = await import('@capacitor/app');
 
-      await Browser.open({ url: authUrl, width: 600, height: 700 });
+      let tokenHandled = false;
 
-      App.addListener('appUrlOpen', async (event: any) => {
+      const urlHandle = App.addListener('appUrlOpen', async (event: any) => {
         const url = event.url;
-        if (url && url.includes('access_token')) {
-          const hashPart = url.split('#')[1];
-          if (hashPart) {
+        if (!tokenHandled && url && url.includes('access_token')) {
+          const hashIndex = url.indexOf('#');
+          if (hashIndex !== -1) {
+            const hashPart = url.substring(hashIndex + 1);
             const params = new URLSearchParams(hashPart);
             const token = params.get('access_token');
             if (token) {
+              tokenHandled = true;
               await Browser.close();
               handleToken(token);
             }
           }
         }
       });
+
+      const browserHandle = Browser.addListener('browserFinished', async () => {
+        if (!tokenHandled) {
+          tokenHandled = true;
+          await urlHandle.remove();
+          const stored = localStorage.getItem('aura_gapi_token');
+          if (stored) handleToken(stored);
+        }
+      });
+
+      await Browser.open({ url: authUrl, width: 600, height: 700 });
+
     } catch (_e) {
       window.location.href = authUrl;
     }
