@@ -1,11 +1,9 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Capacitor } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
 
 const GITHUB_REPO = 'Haris-Ahmed83/aura-os';
 const APPLIED_VERSION_KEY = 'aura_applied_version';
 const APK_VERSION_KEY = 'aura_apk_version';
-const CURRENT_VERSION_KEY = 'aura_current_version';
 
 export interface UpdateInfo {
   hasWebUpdate: boolean;
@@ -13,10 +11,6 @@ export interface UpdateInfo {
   version?: string;
   apkDownloadUrl?: string;
   webBundleUrl?: string;
-}
-
-export function getCurrentVersion(): string {
-  return localStorage.getItem(CURRENT_VERSION_KEY) || '0';
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
@@ -65,49 +59,21 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 
 export async function applyWebUpdate(url: string, version: string): Promise<boolean> {
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+    const redirectResponse = await fetch(url, { redirect: 'follow' });
+    const directUrl = redirectResponse.url;
 
-    const blob = await response.blob();
-    const reader = new FileReader();
-
-    return new Promise((resolve, reject) => {
-      reader.onload = async () => {
-        try {
-          const base64Data = (reader.result as string).split(',')[1];
-          const fileName = `web-bundle-${version}.zip`;
-
-          await Filesystem.writeFile({
-            path: fileName,
-            data: base64Data,
-            directory: Directory.Cache,
-          });
-
-          const fileUri = await Filesystem.getUri({
-            path: fileName,
-            directory: Directory.Cache,
-          });
-
-          const downloaded = await CapacitorUpdater.download({
-            url: fileUri.uri,
-            version: version,
-          });
-
-          localStorage.setItem(APPLIED_VERSION_KEY, version);
-          localStorage.setItem(CURRENT_VERSION_KEY, version);
-          await CapacitorUpdater.set({ id: downloaded.id });
-
-          resolve(true);
-        } catch (e) {
-          console.error('Web apply failed:', e);
-          reject(e);
-        }
-      };
-      reader.onerror = () => reject(new Error('FileReader failed'));
-      reader.readAsDataURL(blob);
+    const downloaded = await CapacitorUpdater.download({
+      url: directUrl,
+      version: version,
     });
+
+    localStorage.setItem(APPLIED_VERSION_KEY, version);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await CapacitorUpdater.set({ id: downloaded.id });
+
+    return true;
   } catch (error) {
-    console.error('Web update download failed:', error);
+    console.error('Web update failed:', error);
     throw error;
   }
 }
