@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { useGoogleLogin } from '@react-oauth/google';
+import React, { useState, useEffect, useCallback } from 'react';
 import { gapi } from 'gapi-script';
-import { Calendar as CalendarIcon, Mail, CheckCircle2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Mail, CheckCircle2, LogOut } from 'lucide-react';
 
 const CLIENT_ID = "93524226912-iv57sq9ts1i1a6a0rane5o4c19ujacn5.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly";
+
+function getRedirectUri(): string {
+  const loc = window.location;
+  if (loc.protocol === 'capacitor:' || loc.hostname === 'localhost' && loc.port === '') {
+    return 'https://localhost';
+  }
+  return loc.origin + loc.pathname;
+}
 
 export const GoogleConnect: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -12,75 +19,105 @@ export const GoogleConnect: React.FC = () => {
   const [emails, setEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    function start() {
-      gapi.client.init({
-        clientId: CLIENT_ID,
-        scope: SCOPES,
-      });
-    }
-    gapi.load('client:auth2', start);
-  }, []);
-
-  const login = useGoogleLogin({
-    onSuccess: (codeResponse) => {
-      setUser(codeResponse);
-      // Store token globally so Schedule page can use it for creating events
-      (window as any).gapiAccessToken = codeResponse.access_token;
-      fetchData(codeResponse.access_token);
-    },
-    scope: SCOPES,
-    onError: (error) => console.log('Login Failed:', error)
-  });
-
-  const fetchData = async (accessToken: string) => {
+  const fetchData = useCallback(async (accessToken: string) => {
     setLoading(true);
     gapi.client.setToken({ access_token: accessToken });
-    
+    (window as any).gapiAccessToken = accessToken;
+
     try {
-      // Fetch Calendar Events
       await gapi.client.load('calendar', 'v3');
       const calendarResponse = await (gapi.client as any).calendar.events.list({
-        'calendarId': 'primary',
-        'timeMin': (new Date()).toISOString(),
-        'showDeleted': false,
-        'singleEvents': true,
-        'maxResults': 3,
-        'orderBy': 'startTime'
+        calendarId: 'primary',
+        timeMin: new Date().toISOString(),
+        showDeleted: false,
+        singleEvents: true,
+        maxResults: 3,
+        orderBy: 'startTime'
       });
       setEvents(calendarResponse.result.items || []);
 
-      // Fetch Gmail Messages
       await gapi.client.load('gmail', 'v1');
       const gmailResponse = await (gapi.client as any).gmail.users.messages.list({
-        'userId': 'me',
-        'q': 'is:unread',
-        'maxResults': 3
+        userId: 'me',
+        q: 'is:unread',
+        maxResults: 3
       });
-      
+
       const messages = gmailResponse.result.messages || [];
       const emailDetails = await Promise.all(
         messages.map(async (msg: any) => {
           const res = await (gapi.client as any).gmail.users.messages.get({
-            'userId': 'me',
-            'id': msg.id,
-            'format': 'metadata',
-            'metadataHeaders': ['Subject', 'From']
+            userId: 'me',
+            id: msg.id,
+            format: 'metadata',
+            metadataHeaders: ['Subject', 'From']
           });
           return res.result;
         })
       );
       setEmails(emailDetails);
-      
     } catch (error) {
       console.error("Error fetching data", error);
     }
     setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    gapi.load('client:auth2', () => {
+      gapi.client.init({ clientId: CLIENT_ID, scope: SCOPES });
+    });
+
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      const params = new URLSearchParams(hash.substring(1));
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        localStorage.setItem('aura_gapi_token', accessToken);
+        setUser({ access_token: accessToken });
+        fetchData(accessToken);
+        return;
+      }
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    const stored = localStorage.getItem('aura_gapi_token');
+    if (stored) {
+      setUser({ access_token: stored });
+      fetchData(stored);
+    }
+  }, [fetchData]);
+
+  const login = () => {
+    const redirectUri = getRedirectUri();
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth` +
+      `?client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=token` +
+      `&scope=${encodeURIComponent(SCOPES)}` +
+      `&prompt=select_account`;
+    localStorage.removeItem('aura_gapi_token');
+    (window as any).gapiAccessToken = null;
+    window.location.href = authUrl;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('aura_gapi_token');
+    (window as any).gapiAccessToken = null;
+    setUser(null);
+    setEvents([]);
+    setEmails([]);
+    gapi.client.setToken(null);
   };
 
   if (!user) {
     return (
-      <button onClick={() => login()} className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '16px' }}>
+      <button onClick={login} className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '16px' }}>
         <CalendarIcon size={18} /> Connect Google Account
       </button>
     );
@@ -88,8 +125,16 @@ export const GoogleConnect: React.FC = () => {
 
   return (
     <div className="google-widgets" style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: '16px' }}>
-      
-      {/* Calendar Widget */}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.8rem', color: 'var(--accent-emerald)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <CheckCircle2 size={14} /> Google Connected
+        </span>
+        <button onClick={logout} style={{ background: 'none', border: '1px solid var(--surface-border)', color: 'var(--text-secondary)', borderRadius: '8px', padding: '6px 12px', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <LogOut size={12} /> Disconnect
+        </button>
+      </div>
+
       <div className="widget glass-panel" style={{ padding: '20px' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '1rem', color: 'var(--text-secondary)' }}>
           <CalendarIcon size={18} color="var(--accent-blue)" /> Upcoming Meetings
@@ -108,7 +153,6 @@ export const GoogleConnect: React.FC = () => {
         )}
       </div>
 
-      {/* Gmail Widget */}
       <div className="widget glass-panel" style={{ padding: '20px' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '1rem', color: 'var(--text-secondary)' }}>
           <Mail size={18} color="var(--accent-rose)" /> Unread Emails
