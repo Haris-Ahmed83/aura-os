@@ -7,7 +7,7 @@ const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.goog
 
 function getRedirectUri(): string {
   const loc = window.location;
-  if (loc.protocol === 'capacitor:' || loc.hostname === 'localhost' && loc.port === '') {
+  if (loc.protocol === 'capacitor:' || (loc.hostname === 'localhost' && loc.port === '')) {
     return 'https://localhost';
   }
   return loc.origin + loc.pathname;
