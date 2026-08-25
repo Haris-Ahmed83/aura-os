@@ -278,7 +278,9 @@ function App() {
   const [personalKnowledge, setPersonalKnowledge] = useState<Record<string, string>>({});
 
   // Update state
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; hasWebUpdate: boolean; hasApkUpdate: boolean; webBundleUrl?: string; apkDownloadUrl?: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; hasUpdate: boolean; apkDownloadUrl?: string } | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState('');
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState('');
   const [spotifyPlaylist, setSpotifyPlaylist] = useState('https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0');
@@ -344,12 +346,10 @@ function App() {
       try {
         const { checkForUpdates } = await import('./services/updater');
         const result = await checkForUpdates();
-        if ((result.hasWebUpdate || result.hasApkUpdate) && result.version) {
+        if (result.hasUpdate && result.version) {
           setUpdateInfo({
             version: result.version,
-            hasWebUpdate: result.hasWebUpdate,
-            hasApkUpdate: result.hasApkUpdate,
-            webBundleUrl: result.webBundleUrl,
+            hasUpdate: true,
             apkDownloadUrl: result.apkDownloadUrl,
           });
         }
@@ -357,30 +357,18 @@ function App() {
     })();
   }, []);
 
-  const handleApplyWebUpdate = async () => {
-    if (!updateInfo?.webBundleUrl || !updateInfo?.version) return;
+  const handleUpdate = async () => {
+    if (!updateInfo?.apkDownloadUrl || !updateInfo?.version) return;
     setUpdating(true);
-    setUpdateProgress('Downloading update...');
+    setUpdateProgress('Opening download...');
     try {
-      const { applyWebUpdate } = await import('./services/updater');
-      await applyWebUpdate(updateInfo.webBundleUrl, updateInfo.version);
-      setUpdateProgress('Update applied! Reloading...');
-      setTimeout(() => { window.location.reload(); }, 1500);
+      const { downloadAndInstallApk } = await import('./services/updater');
+      await downloadAndInstallApk(updateInfo.apkDownloadUrl, updateInfo.version);
+      setUpdateProgress('Download started! Install from notifications.');
     } catch (_e) {
       setUpdateProgress('');
       setUpdating(false);
       toast.error('Update failed. Try again.');
-    }
-  };
-
-  const handleDownloadApk = async () => {
-    if (!updateInfo?.apkDownloadUrl || !updateInfo?.version) return;
-    try {
-      const { downloadAndInstallApk } = await import('./services/updater');
-      await downloadAndInstallApk(updateInfo.apkDownloadUrl, updateInfo.version);
-      toast.success('APK download started! Open notification to install.');
-    } catch (_e) {
-      toast.error('Download failed. Try again.');
     }
   };
 
@@ -1659,54 +1647,33 @@ Always prefer calling functions over just talking about them.`,
           }}>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--accent)' }}>
-                {updating ? `Updating to v${updateInfo.version}...` : `Update available: v${updateInfo.version}`}
+                {updating ? `Updating to v${updateInfo.version}...` : `New version available: v${updateInfo.version}`}
               </div>
               {updateProgress && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{updateProgress}</div>}
               {!updating && !updateProgress && (
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-                  {updateInfo.hasWebUpdate && updateInfo.hasApkUpdate && 'App & web updates available'}
-                  {updateInfo.hasWebUpdate && !updateInfo.hasApkUpdate && 'Web update available'}
-                  {!updateInfo.hasWebUpdate && updateInfo.hasApkUpdate && 'App update available'}
+                  Tap Update to download the latest version
                 </div>
               )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              {updateInfo.hasWebUpdate && (
-                <button
-                  onClick={handleApplyWebUpdate}
-                  disabled={updating}
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '8px 16px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: updating ? 'not-allowed' : 'pointer',
-                    opacity: updating ? 0.6 : 1,
-                  }}
-                >
-                  {updating ? 'Updating...' : 'Update'}
-                </button>
-              )}
-              {updateInfo.hasApkUpdate && (
-                <button
-                  onClick={handleDownloadApk}
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '8px 16px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Download APK
-                </button>
-              )}
+              <button
+                onClick={handleUpdate}
+                disabled={updating}
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: updating ? 'not-allowed' : 'pointer',
+                  opacity: updating ? 0.6 : 1,
+                }}
+              >
+                {updating ? 'Updating...' : 'Update'}
+              </button>
               <button
                 onClick={() => setUpdateInfo(null)}
                 style={{
