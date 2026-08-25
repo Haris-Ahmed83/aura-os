@@ -69,6 +69,8 @@ jobs:
             web-bundle.zip
             android/app/build/outputs/apk/debug/app-debug.apk
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ inputs.github_token || secrets.VITE_GITHUB_TOKEN }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
