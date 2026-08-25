@@ -4,20 +4,20 @@ import { Calendar as CalendarIcon, Mail, CheckCircle2, LogOut } from 'lucide-rea
 
 const CLIENT_ID = "93524226912-iv57sq9ts1i1a6a0rane5o4c19ujacn5.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly";
-
-function getRedirectUri(): string {
-  const loc = window.location;
-  if (loc.protocol === 'capacitor:' || (loc.hostname === 'localhost' && loc.port === '')) {
-    return 'https://localhost';
-  }
-  return loc.origin + loc.pathname;
-}
+const REDIRECT_URI = "https://localhost";
 
 export const GoogleConnect: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [emails, setEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const handleToken = useCallback(async (accessToken: string) => {
+    localStorage.setItem('aura_gapi_token', accessToken);
+    (window as any).gapiAccessToken = accessToken;
+    setUser({ access_token: accessToken });
+    await fetchData(accessToken);
+  }, []);
 
   const fetchData = useCallback(async (accessToken: string) => {
     setLoading(true);
@@ -67,43 +67,46 @@ export const GoogleConnect: React.FC = () => {
       gapi.client.init({ clientId: CLIENT_ID, scope: SCOPES });
     });
 
-    const hash = window.location.hash;
-    if (hash && hash.includes('access_token')) {
-      const params = new URLSearchParams(hash.substring(1));
-      const accessToken = params.get('access_token');
-      if (accessToken) {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        localStorage.setItem('aura_gapi_token', accessToken);
-        setUser({ access_token: accessToken });
-        fetchData(accessToken);
-        return;
-      }
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (code) {
-      window.history.replaceState(null, '', window.location.pathname);
-    }
-
     const stored = localStorage.getItem('aura_gapi_token');
     if (stored) {
-      setUser({ access_token: stored });
-      fetchData(stored);
+      handleToken(stored);
     }
-  }, [fetchData]);
+  }, [handleToken]);
 
-  const login = () => {
-    const redirectUri = getRedirectUri();
+  const login = async () => {
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth` +
       `?client_id=${CLIENT_ID}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
       `&response_type=token` +
       `&scope=${encodeURIComponent(SCOPES)}` +
       `&prompt=select_account`;
+
     localStorage.removeItem('aura_gapi_token');
     (window as any).gapiAccessToken = null;
-    window.location.href = authUrl;
+
+    try {
+      const { Browser } = await import('@capacitor/browser');
+      const { App } = await import('@capacitor/app');
+
+      await Browser.open({ url: authUrl, width: 600, height: 700 });
+
+      App.addListener('appUrlOpen', async (event: any) => {
+        const url = event.url;
+        if (url && url.includes('access_token')) {
+          const hashPart = url.split('#')[1];
+          if (hashPart) {
+            const params = new URLSearchParams(hashPart);
+            const token = params.get('access_token');
+            if (token) {
+              await Browser.close();
+              handleToken(token);
+            }
+          }
+        }
+      });
+    } catch (_e) {
+      window.location.href = authUrl;
+    }
   };
 
   const logout = () => {
