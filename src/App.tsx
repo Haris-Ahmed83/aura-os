@@ -956,7 +956,7 @@ function App() {
         const totalSpent = expenses.filter(e => e.recurring || e.date.startsWith(currentMonthStr)).reduce((s, e) => s + e.amount, 0);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-2.5-flash",
+          model: "gemini-3.6-flash",
           generationConfig: {
             maxOutputTokens: 300,
             temperature: 0.7
