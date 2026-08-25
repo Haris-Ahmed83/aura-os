@@ -39,14 +39,6 @@ jobs:
         id: version
         run: echo "VERSION=$(date +'%Y%m%d.%H%M%S')" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release with web bundle
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release v${{ steps.version.outputs.VERSION }}
-          files: web-bundle.zip
-          generate_release_notes: true
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -59,7 +51,17 @@ jobs:
       - name: Build APK
         run: cd android && ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Create GitHub Release with web bundle + APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release v${{ steps.version.outputs.VERSION }}
+          files: |
+            web-bundle.zip
+            android/app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: true
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: aura-os-apk
