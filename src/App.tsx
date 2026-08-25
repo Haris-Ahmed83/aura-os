@@ -281,8 +281,6 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; hasUpdate: boolean; apkDownloadUrl?: string } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState('');
-  const [updating, setUpdating] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState('');
   const [spotifyPlaylist, setSpotifyPlaylist] = useState('https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0');
 
   // New Feature States
