@@ -4,7 +4,7 @@ import { Calendar as CalendarIcon, Mail, CheckCircle2, LogOut } from 'lucide-rea
 
 const CLIENT_ID = "93524226912-iv57sq9ts1i1a6a0rane5o4c19ujacn5.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly";
-const REDIRECT_URI = "https://localhost";
+const REDIRECT_URI = "com.aura.app://callback";
 
 export const GoogleConnect: React.FC = () => {
   const [user, setUser] = useState<any>(null);
