@@ -838,8 +838,9 @@ function App() {
     setAiChatMessages(prev => [...prev, { sender: 'user', text: userInputText }]);
     setAiChatInput('');
 
-    // Merge static knowledge base + user-stored runtime knowledge
-    const mergedKB: Record<string, string> = { ...HARIS_KNOWLEDGE_BASE, ...personalKnowledge };
+    // Merge static knowledge base + user-stored runtime knowledge + learned patterns
+    const learnedPatterns = JSON.parse(localStorage.getItem('aura_ai_learned') || '{}');
+    const mergedKB: Record<string, string> = { ...HARIS_KNOWLEDGE_BASE, ...personalKnowledge, ...learnedPatterns };
 
     // ── TRUE LLM ENGINE (Google Gemini) ──────────────────────────────────────
     if (settings.geminiApiKey && settings.geminiApiKey.trim() !== '') {
@@ -923,6 +924,24 @@ function App() {
                 },
                 required: ["mood"]
               }
+            },
+            {
+              name: "delete_task",
+              description: "Delete a task from the board. Use when user says to delete or remove a task.",
+              parameters: {
+                type: SchemaType.OBJECT,
+                properties: { title_keyword: { type: SchemaType.STRING, description: "A keyword from the task title to match" } },
+                required: ["title_keyword"]
+              }
+            },
+            {
+              name: "get_my_info",
+              description: "Answer questions about Haris - his profile, skills, projects, experience. Use when user asks about themselves.",
+              parameters: {
+                type: SchemaType.OBJECT,
+                properties: { question: { type: SchemaType.STRING, description: "What the user asked about themselves" } },
+                required: ["question"]
+              }
             }
           ]
         };
@@ -937,20 +956,40 @@ function App() {
         const totalSpent = expenses.filter(e => e.recurring || e.date.startsWith(currentMonthStr)).reduce((s, e) => s + e.amount, 0);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-3.6-flash",
+          model: "gemini-2.5-flash",
           generationConfig: {
-            maxOutputTokens: 250,
+            maxOutputTokens: 300,
             temperature: 0.7
           },
-          systemInstruction: `You are Aura — Haris's personal AI partner. Be concise, fast, and speak in Roman Urdu (Pakistani style).
-If user says "hi", reply simply with "hi 👋" or "kya haal hai?". Keep replies short (1-2 sentences max unless detailed info requested).
+          systemInstruction: `You are Aura — Haris's personal AI assistant and partner. You speak in Roman Urdu (Pakistani casual style). Be concise and direct.
 
-TRAINED ON: ${JSON.stringify(mergedKB)}
-APP STATE: Total Funds: Rs ${totalFunds}, Income: Rs ${monthlyIncome}, Spent: Rs ${totalSpent}, Remaining: Rs ${totalFunds + monthlyIncome - totalSpent}.
-Tasks List:
-${currentTasks || 'None'}
+CRITICAL RULES FOR FUNCTION CALLS:
+- When user asks to SET/ADD/CREATE a meeting, event, reminder → ALWAYS call add_meeting function
+- When user says "spent X on Y" or "add expense" → ALWAYS call add_expense
+- When user says "set income/budget" → ALWAYS call set_income
+- When user says "add task" or "todo" → ALWAYS call add_task
+- When user says "I feel X" → ALWAYS call log_mood
+- When user says "done with X" or "finished X" → call move_task_to_done
+- When user says "started working on X" → call move_task_to_inprogress
+- NEVER just suggest what to do — ACTUALLY DO IT by calling the function
+- If a time is given like "10pm", convert to 24hr format (22:00)
+- If no date is given, use today: ${new Date().toISOString().split('T')[0]}
+- If no time is given, use 10:00
 
-FULL APP CONTROL: Use function tools for expenses, tasks, meetings, income, mood.`,
+SELF-IMPROVEMENT: If user corrects you or says "no, I meant..." or "actually...", remember the correction. Store it as a learned pattern.
+
+PERSONAL KNOWLEDGE: ${JSON.stringify(mergedKB)}
+
+APP STATE:
+- Total Funds: Rs ${totalFunds}
+- Monthly Income: Rs ${monthlyIncome}
+- Spent this month: Rs ${totalSpent}
+- Remaining: Rs ${totalFunds + monthlyIncome - totalSpent}
+- Current Tasks:
+${currentTasks || 'No tasks yet'}
+
+Available actions: add_task, move_task_to_inprogress, move_task_to_done, add_expense, set_income, add_meeting, log_mood.
+Always prefer calling functions over just talking about them.`,
           tools: [appTools as any]
         });
         
@@ -1071,6 +1110,22 @@ FULL APP CONTROL: Use function tools for expenses, tasks, meetings, income, mood
               setJournalEntries(prev => [{ id: Date.now().toString(), content: args.note || `Mood: ${args.mood}`, date: new Date().toISOString(), mood: emoji }, ...prev]);
               toast.success(`Mood logged: ${emoji}`);
               actionsDone.push(`${emoji} Mood note ho gaya: ${args.mood}`);
+            } else if (call.name === 'delete_task') {
+              const keyword = args.title_keyword.toLowerCase();
+              setTasks(prev => {
+                const matched = [...prev.todo, ...prev.inProgress, ...prev.completed].find(t => t.title.toLowerCase().includes(keyword));
+                if (!matched) return prev;
+                return {
+                  todo: prev.todo.filter(t => t.id !== matched.id),
+                  inProgress: prev.inProgress.filter(t => t.id !== matched.id),
+                  completed: prev.completed.filter(t => t.id !== matched.id),
+                  deleted: prev.deleted
+                };
+              });
+              toast.success(`Task deleted!`);
+              actionsDone.push(`🗑️ Task "${args.title_keyword}" delete ho gaya!`);
+            } else if (call.name === 'get_my_info') {
+              actionsDone.push(`📋 Haris ka profile:\n${Object.entries(mergedKB).map(([k,v]) => `${k}: ${v}`).join('\n')}`);
             }
           }
           
@@ -1088,6 +1143,39 @@ FULL APP CONTROL: Use function tools for expenses, tasks, meetings, income, mood
             newMsgs.pop(); 
             return [...newMsgs, { sender: 'assistant', text: responseText }];
           });
+        }
+
+        // ── Self-Learning: detect corrections and learn ──────────────────────
+        const correctionPatterns = [
+          /(?:no|nahi|galat|wrong|actually|asal mein|i meant|matlab|mujhe chahiye tha|yeh nahi).*?(?:\.|$)/i,
+          /(?:wrong|galat)\s+(?:answer|jawab|response)/i
+        ];
+        const isCorrection = correctionPatterns.some(p => p.test(userInputText));
+        if (isCorrection) {
+          const learned = JSON.parse(localStorage.getItem('aura_ai_learned') || '{}');
+          learned[`correction_${Date.now()}`] = `User said: "${userInputText}" — Context: previous AI response was wrong. Remember this for future.`;
+          const keys = Object.keys(learned);
+          if (keys.length > 50) {
+            const oldest = keys.slice(0, keys.length - 50);
+            oldest.forEach(k => delete learned[k]);
+          }
+          localStorage.setItem('aura_ai_learned', JSON.stringify(learned));
+        }
+
+        // ── Self-Learning: learn user preferences from positive feedback ──────
+        const positivePatterns = /(?:haan|yes|sahi|perfect|bilkul|exactly|great|awesome|shukriya|thanks|good|theek hai)/i;
+        if (positivePatterns.test(userInputText) && aiChatMessages.length >= 2) {
+          const lastUserMsg = aiChatMessages[aiChatMessages.length - 1]?.text || '';
+          if (lastUserMsg) {
+            const learned = JSON.parse(localStorage.getItem('aura_ai_learned') || '{}');
+            learned[`pref_${Date.now()}`] = `User approved this pattern. Remember how I responded to: "${lastUserMsg}"`;
+            const keys = Object.keys(learned);
+            if (keys.length > 50) {
+              const oldest = keys.slice(0, keys.length - 50);
+              oldest.forEach(k => delete learned[k]);
+            }
+            localStorage.setItem('aura_ai_learned', JSON.stringify(learned));
+          }
         }
       } catch (err: any) {
         setAiChatMessages(prev => {
@@ -1118,6 +1206,8 @@ FULL APP CONTROL: Use function tools for expenses, tasks, meetings, income, mood
                          query.match(/(?:add\s+expense)\s+(\w+)\s+(\d+)/i);
     const taskMatch = query.match(/(?:add\s+task|todo|create\s+task|set\s+my\s+new\s+task|set\s+task|i\s+want\s+to\s+make|i\s+make\s+new|make\s+new|new\s+task)\s+(.+)/i);
     const moodMatch = query.match(/(?:i\s+feel|i'm\s+feeling|mood\s+is|my\s+mood\s+is)\s+(\w+)/i);
+    const meetingMatch = query.match(/(?:set|add|create|schedule|make)\s+(?:a\s+)?(?:meeting|event|reminder|session)\s+(?:at|for|on)?\s*(.+)/i) ||
+                        query.match(/(?:meeting|event|reminder)\s+(?:at|for|on)\s+(.+)/i);
 
     // ── Advisor & Q&A patterns ──────────────────────────────────────────────
     const isCareerQuery = query.includes('career') || query.includes('job') || query.includes('freelance') || query.includes('kaam') || query.includes('job dhundo');
@@ -1254,6 +1344,24 @@ FULL APP CONTROL: Use function tools for expenses, tasks, meetings, income, mood
         aiResponseText = `✅ Task add ho gaya: "${taskTitle}"\n\n💡 Tip: Idea Board mein jaake is task ki priority set karo aur subtasks add karo. Focus ke liye High priority lagao!`;
         toast.success(`Task added: "${taskTitle}"`);
       }
+    } else if (meetingMatch) {
+      const meetingInfo = meetingMatch[1].trim();
+      const timeMatch = meetingInfo.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+      let time = '10:00';
+      let title = meetingInfo;
+      if (timeMatch) {
+        let hour = parseInt(timeMatch[1]);
+        const min = timeMatch[2] || '00';
+        const ampm = (timeMatch[3] || '').toLowerCase();
+        if (ampm === 'pm' && hour < 12) hour += 12;
+        if (ampm === 'am' && hour === 12) hour = 0;
+        time = `${String(hour).padStart(2,'0')}:${min}`;
+        title = meetingInfo.replace(timeMatch[0], '').trim() || 'Meeting';
+      }
+      const today = new Date().toISOString().split('T')[0];
+      setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title, date: today, time, type: 'meeting' }]);
+      aiResponseText = `📅 Meeting set ho gayi: "${title}" — Aaj ${time} baje.\n\n💡 Tip: Schedule tab mein dekho aur notification set karo!`;
+      toast.success(`Meeting: ${title} at ${time}`);
     } else if (moodMatch) {
       const moodWord = moodMatch[1].trim().toLowerCase();
       const moodEmojis: Record<string, string> = { happy: '😊', good: '💪', great: '🔥', sad: '😔', tired: '😴', stressed: '😰', motivated: '🚀', bored: '😑' };
