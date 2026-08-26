@@ -197,7 +197,7 @@ const HARIS_KNOWLEDGE_BASE: Record<string, string> = {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState('finance');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [tasks, setTasks] = useState<TaskColumns>(initialTasks);
   const [quickIdea, setQuickIdea] = useState('');
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
@@ -703,21 +703,23 @@ function App() {
   const processVoiceWithAI = async (transcript: string) => {
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-    // Quick local intent detection (no API call needed)
+    // Quick local intent detection
     const lower = transcript.toLowerCase();
     const scheduleKeywords = ['meeting', 'meeting set', 'schedule', 'remind', 'appointment', 'call at', 'session', 'class at', 'conference', 'webinar', 'deadline', 'due date'];
-    const isScheduleIntent = scheduleKeywords.some(k => lower.includes(k)) || /\b(\d{1,2}[:\s]?\d{0,2}\s*(am|pm|o'?clock)?)\b/i.test(transcript);
+    const isScheduleIntent = scheduleKeywords.some(k => lower.includes(k));
     const isExpenseIntent = /\b(spent|expense|bought|pay|paid|rs\.?|rupees|\d+)\s*(on|for|rupees|rs)/i.test(transcript);
 
     if (isScheduleIntent) {
-      // Try Gemini for structured meeting extraction
       if (settings.geminiApiKey) {
         try {
           const { GoogleGenerativeAI, SchemaType } = await import('@google/generative-ai');
           const genAI = new GoogleGenerativeAI(settings.geminiApiKey);
           const model = genAI.getGenerativeModel({
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             generationConfig: { maxOutputTokens: 200, temperature: 0.3 },
             tools: [{
               functionDeclarations: [{
@@ -726,7 +728,7 @@ function App() {
                 parameters: {
                   type: SchemaType.OBJECT,
                   properties: {
-                    title: { type: SchemaType.STRING, description: "Meeting or event title" },
+                    title: { type: SchemaType.STRING, description: "Meeting or event title. If not explicitly stated, use a short descriptive title." },
                     date: { type: SchemaType.STRING, description: "Date in YYYY-MM-DD format" },
                     time: { type: SchemaType.STRING, description: "Time in HH:MM 24hr format" }
                   },
@@ -736,21 +738,60 @@ function App() {
             }]
           });
           const chat = model.startChat();
-          const result = await chat.sendMessage(`Today is ${today}, current time is ${now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}. Timezone: Asia/Karachi. Parse this voice command: "${transcript}". If it contains a meeting/event/schedule/reminder/deadline with time, call add_meeting. If no date, use today. If no time, use 10:00. Convert 12hr to 24hr (e.g. 3pm → 15:00).`);
+          const result = await chat.sendMessage(`Today is ${today} (${now.toLocaleDateString('en-US', { weekday: 'long' })}), current time is ${now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}. Tomorrow is ${tomorrowStr}. Timezone: Asia/Karachi (UTC+5). Parse this voice command: "${transcript}". If it contains a meeting/event/schedule/reminder/deadline, call add_meeting. Convert 12hr to 24hr (e.g. 1am → 01:00, 3pm → 15:00). "tomorrow" = ${tomorrowStr}. "today" = ${today}.`);
           const calls = result.response.functionCalls();
           if (calls && calls.length > 0 && calls[0].name === 'add_meeting') {
             const args = calls[0].args as any;
-            setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: args.title, date: args.date, time: args.time || '10:00', type: 'meeting' }]);
-            toast.success(`📅 Meeting scheduled: "${args.title}" on ${args.date} at ${args.time}`);
+            const meetingDate = args.date || today;
+            const meetingTime = args.time || '10:00';
+            const meetingTitle = args.title || transcript;
+
+            setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: meetingTitle, date: meetingDate, time: meetingTime, type: 'meeting' }]);
+            toast.success(`📅 Meeting scheduled: "${meetingTitle}" on ${meetingDate} at ${meetingTime}`);
             setVoiceTranscript(`📅 ${transcript}`);
+
+            // Sync to Google Calendar
+            const gToken = (window as any).gapiAccessToken;
+            if (gToken) {
+              try {
+                const [hours, minutes] = meetingTime.split(':').map(Number);
+                const startDateTime = new Date(`${meetingDate}T${String(hours).padStart(2,'0')}:${String(minutes || 0).padStart(2,'0')}:00`);
+                const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);
+                const calEvent = {
+                  summary: meetingTitle,
+                  description: 'Added via Aura voice memo',
+                  start: { dateTime: startDateTime.toISOString(), timeZone: 'Asia/Karachi' },
+                  end: { dateTime: endDateTime.toISOString(), timeZone: 'Asia/Karachi' },
+                };
+                const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${gToken}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify(calEvent),
+                });
+                if (res.ok) toast.success('📅 Also added to Google Calendar!');
+                else console.warn('Google Calendar sync failed:', await res.text());
+              } catch (e) { console.warn('Google Calendar sync error:', e); }
+            }
             return;
           }
         } catch (e) {
           console.warn('Gemini scheduling failed, falling back to task:', e);
+          toast.error('AI scheduling failed. Try again or use text input.');
         }
       }
-      // Fallback: if no Gemini key, still try basic local parsing
-      setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: transcript, date: today, time: '10:00', type: 'meeting' }]);
+      // Fallback: local parsing
+      const timeMatch = transcript.match(/(\d{1,2})[:\s]?(\d{0,2})\s*(am|pm)/i);
+      const dateMatch = lower.includes('tomorrow') ? tomorrowStr : today;
+      let timeStr = '10:00';
+      if (timeMatch) {
+        let h = parseInt(timeMatch[1], 10);
+        const m = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+        const ampm = timeMatch[3]?.toLowerCase();
+        if (ampm === 'pm' && h < 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      }
+      setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: transcript, date: dateMatch, time: timeStr, type: 'meeting' }]);
       toast.success(`📅 Event added: "${transcript}"`);
       setVoiceTranscript(`📅 ${transcript}`);
       return;
@@ -1191,7 +1232,7 @@ function App() {
         const totalSpent = expenses.filter(e => e.recurring || e.date.startsWith(currentMonthStr)).reduce((s, e) => s + e.amount, 0);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-2.0-flash",
+          model: "gemini-2.5-flash",
           generationConfig: {
             maxOutputTokens: 300,
             temperature: 0.7
