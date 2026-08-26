@@ -216,7 +216,7 @@ function App() {
 
   // AI Assistant Chat State
   const [aiChatMessages, setAiChatMessages] = useState<{ sender: 'user' | 'assistant'; text: string }[]>([
-    { sender: 'assistant', text: `Hi ${settings.displayName || 'Haris'}! How can I help you today?` }
+    { sender: 'assistant', text: 'Hi Haris! How can I help you today?' }
   ]);
   const [aiChatInput, setAiChatInput] = useState('');
   
