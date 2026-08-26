@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   AlertCircle,
   Info,
-  CheckCheck,
   Trash2,
   BellOff,
 } from "lucide-react";
