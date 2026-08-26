@@ -438,8 +438,15 @@ h1, h2, h3, h4, h5 { font-family: 'Outfit', 'Inter', sans-serif; font-weight: 70
    ================================================================ */
 .settings-view { display: flex; flex-direction: column; gap: 16px; padding: 32px; max-width: 680px; margin: 0 auto; }
 .settings-section { display: flex; flex-direction: column; gap: 16px; }
-.settings-row { display: flex; align-items: center; gap: 16px; }
+.settings-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .settings-row label { font-size: 0.9rem; font-weight: 500; }
+.settings-row input { max-width: 100% !important; box-sizing: border-box; }
+@media (max-width: 600px) {
+  .settings-view { padding: 16px; }
+  .settings-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .settings-row input[type="text"],
+  .settings-row input[type="password"] { width: 100% !important; }
+}
 
 .schedule-view, .journal-view { display: flex; flex-direction: column; gap: 16px; padding: 32px; }
 
