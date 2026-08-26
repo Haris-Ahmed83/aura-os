@@ -31,7 +31,6 @@ import {
   Image as ImageIcon,
   Search as SearchIcon,
   Filter,
-  CloudSun,
   Headphones,
   Download,
   Upload,
@@ -127,7 +126,6 @@ interface AppSettings {
   autoSave: boolean;
   compactMode: boolean;
   geminiApiKey: string;
-  weatherApiKey: string;
 }
 
 interface Habit {
@@ -183,7 +181,6 @@ const defaultSettings: AppSettings = {
   autoSave: true,
   compactMode: false,
   geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
-  weatherApiKey: '',
 };
 
 // ─── HARIS PERSONAL KNOWLEDGE BASE (pre-trained) ───────────────────────────
@@ -264,6 +261,7 @@ function App() {
   // Voice Memo State
   const [isListening, setIsListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceTextInput, setVoiceTextInput] = useState('');
   const recognitionRef = useRef<any>(null);
 
   // AI Auto-Schedule State
@@ -529,7 +527,7 @@ function App() {
   // Voice to Text for Journal
   const handleJournalVoice = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert('Voice recognition not supported in your browser. Try Chrome.'); return; }
+    if (!SpeechRecognition) { return; }
     
     if (isJournalListening) {
       journalRecognitionRef.current?.stop();
@@ -612,7 +610,7 @@ function App() {
   // Voice Memo Handler
   const handleVoiceMemo = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert('Voice recognition not supported in your browser. Try Chrome.'); return; }
+    if (!SpeechRecognition) { return; }
     
     if (isListening) {
       recognitionRef.current?.stop();
@@ -631,13 +629,25 @@ function App() {
       const transcript = event.results[0][0].transcript;
       setVoiceTranscript(transcript);
       setIsListening(false);
-      // Auto-create a task from voice
       setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${transcript}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
     };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
     recognition.start();
   };
+
+  // Voice text fallback — for when SpeechRecognition is unavailable (Android / non-Chrome)
+  const handleVoiceTextSubmit = () => {
+    if (!voiceTextInput.trim()) return;
+    setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${voiceTextInput}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
+    setVoiceTranscript(voiceTextInput);
+    setVoiceTextInput('');
+    toast.success('Idea added from voice memo!');
+  };
+
+  const voiceSupported = typeof window !== 'undefined' && (
+    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  );
 
   // AI Auto-Schedule: take "New Ideas" tasks and schedule them into next 7 days
   const handleAutoSchedule = async () => {
@@ -1879,24 +1889,45 @@ Always prefer calling functions over just talking about them.`,
                   {/* Voice Memo Widget */}
                   <div className="glass-panel" style={{ padding: '24px' }}>
                     <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--text-secondary)' }}>
-                      <Mic size={18} color="var(--accent-rose)" /> Smart Voice Memo
+                      <Mic size={18} color="var(--accent-rose)" /> Quick Idea Capture
                     </h3>
                     <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                      Speak and your idea will instantly appear in the Idea Board.
+                      {voiceSupported
+                        ? 'Speak or type and your idea will instantly appear in the Idea Board.'
+                        : 'Type your idea below to add it to the Idea Board.'}
                     </p>
                     {voiceTranscript && (
                       <div style={{ background: 'rgba(255,255,255,0.05)', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', marginBottom: '14px', borderLeft: '3px solid var(--accent-blue)' }}>
                         🎤 "{voiceTranscript}"
                       </div>
                     )}
-                    <motion.button
-                      whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleVoiceMemo}
-                      className={isListening ? 'btn-primary' : 'btn-secondary'}
-                      style={{ width: '100%', justifyContent: 'center', background: isListening ? 'rgba(244,63,94,0.2)' : undefined, borderColor: isListening ? 'var(--accent-rose)' : undefined }}
-                    >
-                      {isListening ? <><MicOff size={16} /> Stop Listening...</> : <><Mic size={16} /> Start Voice Memo</>}
-                    </motion.button>
+                    {voiceSupported ? (
+                      <motion.button
+                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleVoiceMemo}
+                        className={isListening ? 'btn-primary' : 'btn-secondary'}
+                        style={{ width: '100%', justifyContent: 'center', background: isListening ? 'rgba(244,63,94,0.2)' : undefined, borderColor: isListening ? 'var(--accent-rose)' : undefined }}
+                      >
+                        {isListening ? <><MicOff size={16} /> Stop Listening...</> : <><Mic size={16} /> Start Voice Memo</>}
+                      </motion.button>
+                    ) : (
+                      <form onSubmit={(e) => { e.preventDefault(); handleVoiceTextSubmit(); }} style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          value={voiceTextInput}
+                          onChange={(e) => setVoiceTextInput(e.target.value)}
+                          placeholder="Type your idea..."
+                          style={{
+                            flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            color: 'white', padding: '10px 14px', borderRadius: '8px', outline: 'none',
+                            fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                          }}
+                        />
+                        <motion.button type="submit" whileTap={{ scale: 0.95 }} className="btn-primary" style={{ padding: '10px 16px' }}>
+                          <Plus size={16} /> Add
+                        </motion.button>
+                      </form>
+                    )}
                   </div>
 
                   {/* AI Auto-Schedule Widget */}
@@ -1924,7 +1955,7 @@ Always prefer calling functions over just talking about them.`,
                   </div>
 
                   {/* Weather Widget */}
-                  <WeatherWidget apiKey={settings.weatherApiKey} />
+                   <WeatherWidget />
 
                   {/* Spotify Embed Widget */}
                   <div className="glass-panel" style={{ padding: '24px' }}>
@@ -2154,9 +2185,11 @@ Always prefer calling functions over just talking about them.`,
                           <input type="file" accept="image/*" onChange={handleJournalImageUpload} style={{ display: 'none' }} />
                         </label>
                         
+                        {voiceSupported && (
                         <motion.button type="button" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={handleJournalVoice} style={{ background: 'none', border: 'none', color: isJournalListening ? 'var(--accent-rose)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }} title="Voice Journal">
                           {isJournalListening ? <MicOff size={16} /> : <Mic size={16} />} {isJournalListening ? 'Listening...' : 'Voice'}
                         </motion.button>
+                        )}
                       </div>
 
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} type="submit" className="btn-primary" style={{ position: 'absolute', bottom: '12px', right: '16px' }}>
@@ -2255,18 +2288,6 @@ Always prefer calling functions over just talking about them.`,
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="btn-primary" onClick={handleSaveSettings} style={{ padding: '12px 32px' }}>
                   {settingsSaved ? <><CheckCircle2 size={16} /> Saved!</> : <><Save size={16} /> Save Settings</>}
                 </motion.button>
-
-                {/* Weather API Key */}
-                <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
-                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--text-secondary)' }}><CloudSun size={18} /> Weather API</h3>
-                  <div className="settings-row">
-                    <div>
-                      <label>OpenWeatherMap API Key</label>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Get free key from openweathermap.org to show live weather.</p>
-                    </div>
-                    <input type="password" placeholder="Paste your API key..." value={settings.weatherApiKey || ''} onChange={(e) => setSettings({ ...settings, weatherApiKey: e.target.value })} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '10px 14px', borderRadius: '8px', outline: 'none', fontFamily: 'Inter, sans-serif', width: '250px', maxWidth: '100%' }} />
-                  </div>
-                </div>
 
                 {/* Theme Manager */}
                 <div className="settings-section glass-panel" style={{ padding: '24px', marginTop: '16px' }}>
