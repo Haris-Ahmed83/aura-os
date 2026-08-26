@@ -99,7 +99,7 @@ export default function PomodoroStats({ sessions }: PomodoroStatsProps) {
       }
     }
 
-    const dayData: DayData[] = DAY_LABELS.map((label, i) => ({
+    const dayData: DayData[] = DAY_LABELS.map((label) => ({
       label,
       shortLabel: label,
       minutes: 0,
