@@ -7,7 +7,6 @@ import {
   CloudLightning,
   CloudFog,
   CloudDrizzle,
-  CloudSun,
   Droplets,
   Wind,
   Thermometer,
@@ -15,67 +14,33 @@ import {
   AlertCircle,
 } from "lucide-react";
 
+const API_KEY = "214d7023ffb25783d0a8c690e5b26149";
+const CITY = "Abbottabad";
+const COUNTRY = "PK";
+
 interface WeatherData {
-  current: {
-    temperature_2m: number;
-    apparent_temperature: number;
-    relative_humidity_2m: number;
-    weather_code: number;
-    wind_speed_10m: number;
+  main: {
+    temp: number;
+    feels_like: number;
+    humidity: number;
+    temp_min: number;
+    temp_max: number;
   };
+  weather: { id: number; main: string; description: string; icon: string }[];
+  wind: { speed: number };
+  name: string;
+  sys: { country: string; sunrise: number; sunset: number };
 }
 
-const WMO_CODES: Record<number, { condition: string; label: string }> = {
-  0: { condition: "Clear", label: "Clear sky" },
-  1: { condition: "Clear", label: "Mainly clear" },
-  2: { condition: "Clouds", label: "Partly cloudy" },
-  3: { condition: "Clouds", label: "Overcast" },
-  45: { condition: "Fog", label: "Fog" },
-  48: { condition: "Fog", label: "Rime fog" },
-  51: { condition: "Drizzle", label: "Light drizzle" },
-  53: { condition: "Drizzle", label: "Moderate drizzle" },
-  55: { condition: "Drizzle", label: "Dense drizzle" },
-  56: { condition: "Drizzle", label: "Freezing drizzle" },
-  57: { condition: "Drizzle", label: "Dense freezing drizzle" },
-  61: { condition: "Rain", label: "Slight rain" },
-  63: { condition: "Rain", label: "Moderate rain" },
-  65: { condition: "Rain", label: "Heavy rain" },
-  66: { condition: "Rain", label: "Freezing rain" },
-  67: { condition: "Rain", label: "Heavy freezing rain" },
-  71: { condition: "Snow", label: "Slight snow" },
-  73: { condition: "Snow", label: "Moderate snow" },
-  75: { condition: "Snow", label: "Heavy snow" },
-  77: { condition: "Snow", label: "Snow grains" },
-  80: { condition: "Rain", label: "Rain showers" },
-  81: { condition: "Rain", label: "Moderate rain showers" },
-  82: { condition: "Rain", label: "Violent rain showers" },
-  85: { condition: "Snow", label: "Snow showers" },
-  86: { condition: "Snow", label: "Heavy snow showers" },
-  95: { condition: "Thunderstorm", label: "Thunderstorm" },
-  96: { condition: "Thunderstorm", label: "Thunderstorm with hail" },
-  99: { condition: "Thunderstorm", label: "Severe thunderstorm" },
-};
-
-const getWeatherIcon = (code: number) => {
-  const condition = WMO_CODES[code]?.condition ?? "Clear";
-  switch (condition) {
-    case "Clear":
-      return <Sun size={32} color="var(--accent)" />;
-    case "Clouds":
-      return <Cloud size={32} color="var(--text-2)" />;
-    case "Rain":
-      return <CloudRain size={32} color="#5B9BD5" />;
-    case "Drizzle":
-      return <CloudDrizzle size={32} color="#5B9BD5" />;
-    case "Thunderstorm":
-      return <CloudLightning size={32} color="#FFD93D" />;
-    case "Snow":
-      return <CloudSnow size={32} color="var(--text-1)" />;
-    case "Fog":
-      return <CloudFog size={32} color="var(--text-3)" />;
-    default:
-      return <CloudSun size={32} color="var(--accent)" />;
-  }
+const getWeatherIcon = (weatherId: number) => {
+  if (weatherId >= 200 && weatherId < 300) return <CloudLightning size={32} color="#FFD93D" />;
+  if (weatherId >= 300 && weatherId < 400) return <CloudDrizzle size={32} color="#5B9BD5" />;
+  if (weatherId >= 500 && weatherId < 600) return <CloudRain size={32} color="#5B9BD5" />;
+  if (weatherId >= 600 && weatherId < 700) return <CloudSnow size={32} color="var(--text-1)" />;
+  if (weatherId >= 700 && weatherId < 800) return <CloudFog size={32} color="var(--text-3)" />;
+  if (weatherId === 800) return <Sun size={32} color="var(--accent)" />;
+  if (weatherId > 800) return <Cloud size={32} color="var(--text-2)" />;
+  return <Sun size={32} color="var(--accent)" />;
 };
 
 export default function WeatherWidget() {
@@ -88,9 +53,12 @@ export default function WeatherWidget() {
     setError(null);
     try {
       const res = await fetch(
-        "https://api.open-meteo.com/v1/forecast?latitude=34.1688&longitude=73.2462&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Asia/Karachi"
+        `https://api.openweathermap.org/data/2.5/weather?q=${CITY},${COUNTRY}&appid=${API_KEY}&units=metric`
       );
-      if (!res.ok) throw new Error(`Weather API error: ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error("Invalid API key");
+        throw new Error(`Weather API error: ${res.status}`);
+      }
       const data: WeatherData = await res.json();
       setWeather(data);
     } catch (err) {
@@ -128,17 +96,17 @@ export default function WeatherWidget() {
 
   if (!weather) return null;
 
-  const code = weather.current.weather_code;
-  const label = WMO_CODES[code]?.label ?? "Unknown";
-  const temp = Math.round(weather.current.temperature_2m);
-  const feelsLike = Math.round(weather.current.apparent_temperature);
-  const humidity = weather.current.relative_humidity_2m;
-  const wind = weather.current.wind_speed_10m;
+  const weatherId = weather.weather[0]?.id ?? 800;
+  const label = weather.weather[0]?.description ?? "Unknown";
+  const temp = Math.round(weather.main.temp);
+  const feelsLike = Math.round(weather.main.feels_like);
+  const humidity = weather.main.humidity;
+  const wind = weather.wind.speed;
 
   return (
     <div className="glass-panel" style={styles.container}>
       <div style={styles.header}>
-        {getWeatherIcon(code)}
+        {getWeatherIcon(weatherId)}
         <div>
           <div style={styles.temp}>{temp}°C</div>
           <div style={styles.desc}>{label}</div>
@@ -159,7 +127,7 @@ export default function WeatherWidget() {
         <div style={styles.detailItem}>
           <Wind size={16} color="var(--text-3)" />
           <span style={styles.detailLabel}>Wind</span>
-          <span style={styles.detailValue}>{wind} km/h</span>
+          <span style={styles.detailValue}>{wind} m/s</span>
         </div>
       </div>
 
