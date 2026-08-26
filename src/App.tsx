@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, 
   KanbanSquare, 
@@ -15,11 +15,8 @@ import {
   Trash2,
   X,
   StickyNote,
-  Moon,
-  Sun,
   User,
   Shield,
-  Palette,
   Save,
   BookOpen,
   BarChart2,
@@ -39,8 +36,7 @@ import {
   ArrowRight,
   Target,
   FileText,
-  Lock,
-  TrendingUp
+  Lock
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
@@ -55,7 +51,7 @@ import QuickNotes from './components/QuickNotes';
 import ThemeManager from './components/ThemeManager';
 import AppLock from './components/AppLock';
 import { exportToPDF } from './components/pdfExport';
-import NotificationCenter, { sendBrowserNotification } from './components/NotificationCenter';
+import NotificationCenter from './components/NotificationCenter';
 import RecurringTracker from './components/RecurringTracker';
 import PomodoroStats from './components/PomodoroStats';
 import './index.css';
@@ -661,8 +657,8 @@ function App() {
       if (result && result.matches && result.matches.length > 0) {
         const transcript = result.matches[0];
         setVoiceTranscript(transcript);
-        setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${transcript}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
-        toast.success('Idea captured from voice!');
+        setIsListening(false);
+        await processVoiceWithAI(transcript);
       }
       return;
     } catch (e) {
@@ -683,11 +679,11 @@ function App() {
     recognitionRef.current = recognition;
 
     recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
+    recognition.onresult = async (event: any) => {
       const transcript = event.results[0][0].transcript;
       setVoiceTranscript(transcript);
       setIsListening(false);
-      setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${transcript}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
+      await processVoiceWithAI(transcript);
     };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
@@ -695,12 +691,87 @@ function App() {
   };
 
   // Voice text fallback — for when SpeechRecognition is unavailable (Android / non-Chrome)
-  const handleVoiceTextSubmit = () => {
+  const handleVoiceTextSubmit = async () => {
     if (!voiceTextInput.trim()) return;
-    setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${voiceTextInput}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
-    setVoiceTranscript(voiceTextInput);
+    const transcript = voiceTextInput;
+    setVoiceTranscript(transcript);
     setVoiceTextInput('');
-    toast.success('Idea added from voice memo!');
+    await processVoiceWithAI(transcript);
+  };
+
+  // AI Voice Intent — uses Gemini to determine if voice should be a task, meeting, expense, etc.
+  const processVoiceWithAI = async (transcript: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+
+    // Quick local intent detection (no API call needed)
+    const lower = transcript.toLowerCase();
+    const scheduleKeywords = ['meeting', 'meeting set', 'schedule', 'remind', 'appointment', 'call at', 'session', 'class at', 'conference', 'webinar', 'deadline', 'due date'];
+    const isScheduleIntent = scheduleKeywords.some(k => lower.includes(k)) || /\b(\d{1,2}[:\s]?\d{0,2}\s*(am|pm|o'?clock)?)\b/i.test(transcript);
+    const isExpenseIntent = /\b(spent|expense|bought|pay|paid|rs\.?|rupees|\d+)\s*(on|for|rupees|rs)/i.test(transcript);
+
+    if (isScheduleIntent) {
+      // Try Gemini for structured meeting extraction
+      if (settings.geminiApiKey) {
+        try {
+          const { GoogleGenerativeAI, SchemaType } = await import('@google/generative-ai');
+          const genAI = new GoogleGenerativeAI(settings.geminiApiKey);
+          const model = genAI.getGenerativeModel({
+            model: "gemini-2.0-flash",
+            generationConfig: { maxOutputTokens: 200, temperature: 0.3 },
+            tools: [{
+              functionDeclarations: [{
+                name: "add_meeting",
+                description: "Schedule a meeting/event/reminder",
+                parameters: {
+                  type: SchemaType.OBJECT,
+                  properties: {
+                    title: { type: SchemaType.STRING, description: "Meeting or event title" },
+                    date: { type: SchemaType.STRING, description: "Date in YYYY-MM-DD format" },
+                    time: { type: SchemaType.STRING, description: "Time in HH:MM 24hr format" }
+                  },
+                  required: ["title", "date", "time"]
+                }
+              }]
+            }]
+          });
+          const chat = model.startChat();
+          const result = await chat.sendMessage(`Today is ${today}, current time is ${now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}. Timezone: Asia/Karachi. Parse this voice command: "${transcript}". If it contains a meeting/event/schedule/reminder/deadline with time, call add_meeting. If no date, use today. If no time, use 10:00. Convert 12hr to 24hr (e.g. 3pm → 15:00).`);
+          const calls = result.response.functionCalls();
+          if (calls && calls.length > 0 && calls[0].name === 'add_meeting') {
+            const args = calls[0].args as any;
+            setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: args.title, date: args.date, time: args.time || '10:00', type: 'meeting' }]);
+            toast.success(`📅 Meeting scheduled: "${args.title}" on ${args.date} at ${args.time}`);
+            setVoiceTranscript(`📅 ${transcript}`);
+            return;
+          }
+        } catch (e) {
+          console.warn('Gemini scheduling failed, falling back to task:', e);
+        }
+      }
+      // Fallback: if no Gemini key, still try basic local parsing
+      setScheduleEvents(prev => [...prev, { id: Date.now().toString(), title: transcript, date: today, time: '10:00', type: 'meeting' }]);
+      toast.success(`📅 Event added: "${transcript}"`);
+      setVoiceTranscript(`📅 ${transcript}`);
+      return;
+    }
+
+    if (isExpenseIntent) {
+      const match = transcript.match(/(\d+)\s*(?:rs\.?|rupees)/i) || transcript.match(/(?:spent|bought|pay|paid)\s+(\d+)/i);
+      const amount = match ? parseInt(match[1]) : 0;
+      if (amount > 0) {
+        setExpenses(prev => [...prev, { id: Date.now().toString(), name: `🎤 ${transcript}`, amount, category: 'other' as any, date: today, recurring: false }]);
+        setTotalFunds(prev => Math.max(0, prev - amount));
+        toast.success(`💰 Expense logged: Rs ${amount}`);
+        setVoiceTranscript(`💰 ${transcript}`);
+        return;
+      }
+    }
+
+    // Default: add as task/idea
+    setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${transcript}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
+    toast.success('Idea captured from voice!');
+    setVoiceTranscript(transcript);
   };
 
   const voiceSupported = typeof window !== 'undefined';
