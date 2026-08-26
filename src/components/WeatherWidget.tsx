@@ -16,57 +16,81 @@ import {
 } from "lucide-react";
 
 interface WeatherData {
-  main: {
-    temp: number;
-    feels_like: number;
-    humidity: number;
+  current: {
+    temperature_2m: number;
+    apparent_temperature: number;
+    relative_humidity_2m: number;
+    weather_code: number;
+    wind_speed_10m: number;
   };
-  weather: { description: string; icon: string; main: string }[];
-  wind: { speed: number };
-  name: string;
 }
 
-interface WeatherWidgetProps {
-  apiKey: string;
-}
+const WMO_CODES: Record<number, { condition: string; label: string }> = {
+  0: { condition: "Clear", label: "Clear sky" },
+  1: { condition: "Clear", label: "Mainly clear" },
+  2: { condition: "Clouds", label: "Partly cloudy" },
+  3: { condition: "Clouds", label: "Overcast" },
+  45: { condition: "Fog", label: "Fog" },
+  48: { condition: "Fog", label: "Rime fog" },
+  51: { condition: "Drizzle", label: "Light drizzle" },
+  53: { condition: "Drizzle", label: "Moderate drizzle" },
+  55: { condition: "Drizzle", label: "Dense drizzle" },
+  56: { condition: "Drizzle", label: "Freezing drizzle" },
+  57: { condition: "Drizzle", label: "Dense freezing drizzle" },
+  61: { condition: "Rain", label: "Slight rain" },
+  63: { condition: "Rain", label: "Moderate rain" },
+  65: { condition: "Rain", label: "Heavy rain" },
+  66: { condition: "Rain", label: "Freezing rain" },
+  67: { condition: "Rain", label: "Heavy freezing rain" },
+  71: { condition: "Snow", label: "Slight snow" },
+  73: { condition: "Snow", label: "Moderate snow" },
+  75: { condition: "Snow", label: "Heavy snow" },
+  77: { condition: "Snow", label: "Snow grains" },
+  80: { condition: "Rain", label: "Rain showers" },
+  81: { condition: "Rain", label: "Moderate rain showers" },
+  82: { condition: "Rain", label: "Violent rain showers" },
+  85: { condition: "Snow", label: "Snow showers" },
+  86: { condition: "Snow", label: "Heavy snow showers" },
+  95: { condition: "Thunderstorm", label: "Thunderstorm" },
+  96: { condition: "Thunderstorm", label: "Thunderstorm with hail" },
+  99: { condition: "Thunderstorm", label: "Severe thunderstorm" },
+};
 
-const getWeatherIcon = (condition: string) => {
-  switch (condition.toLowerCase()) {
-    case "clear":
+const getWeatherIcon = (code: number) => {
+  const condition = WMO_CODES[code]?.condition ?? "Clear";
+  switch (condition) {
+    case "Clear":
       return <Sun size={32} color="var(--accent)" />;
-    case "clouds":
+    case "Clouds":
       return <Cloud size={32} color="var(--text-2)" />;
-    case "rain":
+    case "Rain":
       return <CloudRain size={32} color="#5B9BD5" />;
-    case "drizzle":
+    case "Drizzle":
       return <CloudDrizzle size={32} color="#5B9BD5" />;
-    case "thunderstorm":
+    case "Thunderstorm":
       return <CloudLightning size={32} color="#FFD93D" />;
-    case "snow":
+    case "Snow":
       return <CloudSnow size={32} color="var(--text-1)" />;
-    case "mist":
-    case "fog":
-    case "haze":
+    case "Fog":
       return <CloudFog size={32} color="var(--text-3)" />;
     default:
       return <CloudSun size={32} color="var(--accent)" />;
   }
 };
 
-export default function WeatherWidget({ apiKey }: WeatherWidgetProps) {
+export default function WeatherWidget() {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchWeather = useCallback(async () => {
-    if (!apiKey) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?lat=34.1688&lon=73.2462&units=metric&appid=${apiKey}`
+        "https://api.open-meteo.com/v1/forecast?latitude=34.1688&longitude=73.2462&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Asia/Karachi"
       );
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) throw new Error(`Weather API error: ${res.status}`);
       const data: WeatherData = await res.json();
       setWeather(data);
     } catch (err) {
@@ -74,23 +98,13 @@ export default function WeatherWidget({ apiKey }: WeatherWidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiKey]);
+  }, []);
 
   useEffect(() => {
-    if (!apiKey) return;
     fetchWeather();
     const interval = setInterval(fetchWeather, 30 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [apiKey, fetchWeather]);
-
-  if (!apiKey) {
-    return (
-      <div className="glass-panel" style={styles.container}>
-        <Sun size={28} color="var(--accent)" />
-        <span style={styles.placeholderText}>Set API key in Settings</span>
-      </div>
-    );
-  }
+  }, [fetchWeather]);
 
   if (loading && !weather) {
     return (
@@ -114,16 +128,20 @@ export default function WeatherWidget({ apiKey }: WeatherWidgetProps) {
 
   if (!weather) return null;
 
-  const condition = weather.weather[0]?.main ?? "Clear";
-  const description = weather.weather[0]?.description ?? "";
+  const code = weather.current.weather_code;
+  const label = WMO_CODES[code]?.label ?? "Unknown";
+  const temp = Math.round(weather.current.temperature_2m);
+  const feelsLike = Math.round(weather.current.apparent_temperature);
+  const humidity = weather.current.relative_humidity_2m;
+  const wind = weather.current.wind_speed_10m;
 
   return (
     <div className="glass-panel" style={styles.container}>
       <div style={styles.header}>
-        {getWeatherIcon(condition)}
+        {getWeatherIcon(code)}
         <div>
-          <div style={styles.temp}>{Math.round(weather.main.temp)}°C</div>
-          <div style={styles.desc}>{description}</div>
+          <div style={styles.temp}>{temp}°C</div>
+          <div style={styles.desc}>{label}</div>
         </div>
       </div>
 
@@ -131,21 +149,17 @@ export default function WeatherWidget({ apiKey }: WeatherWidgetProps) {
         <div style={styles.detailItem}>
           <Thermometer size={16} color="var(--text-3)" />
           <span style={styles.detailLabel}>Feels like</span>
-          <span style={styles.detailValue}>
-            {Math.round(weather.main.feels_like)}°C
-          </span>
+          <span style={styles.detailValue}>{feelsLike}°C</span>
         </div>
         <div style={styles.detailItem}>
           <Droplets size={16} color="var(--text-3)" />
           <span style={styles.detailLabel}>Humidity</span>
-          <span style={styles.detailValue}>{weather.main.humidity}%</span>
+          <span style={styles.detailValue}>{humidity}%</span>
         </div>
         <div style={styles.detailItem}>
           <Wind size={16} color="var(--text-3)" />
           <span style={styles.detailLabel}>Wind</span>
-          <span style={styles.detailValue}>
-            {weather.wind.speed} m/s
-          </span>
+          <span style={styles.detailValue}>{wind} km/h</span>
         </div>
       </div>
 
