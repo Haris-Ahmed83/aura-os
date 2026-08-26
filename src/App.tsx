@@ -40,7 +40,6 @@ import {
   Target,
   FileText,
   Lock,
-  FileText,
   TrendingUp
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
