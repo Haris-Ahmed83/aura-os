@@ -46,18 +46,7 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 }
 
 export async function downloadAndInstallApk(url: string, version: string): Promise<void> {
-  try {
-    const response = await fetch(url, { redirect: 'follow' });
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
-    const { Browser } = await import('@capacitor/browser');
-    await Browser.open({ url: blobUrl });
-
-    localStorage.setItem(APK_VERSION_KEY, version);
-  } catch (_e) {
-    const { Browser } = await import('@capacitor/browser');
-    await Browser.open({ url });
-    localStorage.setItem(APK_VERSION_KEY, version);
-  }
+  const { Browser } = await import('@capacitor/browser');
+  await Browser.open({ url });
+  localStorage.setItem(APK_VERSION_KEY, version);
 }
