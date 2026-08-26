@@ -51,7 +51,7 @@ const EMOJI_OPTIONS = [
 
 function getStreak(dates: string[], dateStrings: string[]): number {
   let streak = 0;
-  for (let i = 0; i < dateStrings.length; i++) {
+  for (let i = dateStrings.length - 1; i >= 0; i--) {
     if (dates.includes(dateStrings[i])) {
       streak++;
     } else {
