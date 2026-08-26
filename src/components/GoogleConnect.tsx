@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { gapi } from 'gapi-script';
 import { Calendar as CalendarIcon, Mail, CheckCircle2, LogOut } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { toast } from 'sonner';
 
 const CLIENT_ID = "93524226912-iv57sq9ts1i1a6a0rane5o4c19ujacn5.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly";
@@ -10,20 +12,27 @@ export const GoogleConnect: React.FC = () => {
   const [events, setEvents] = useState<any[]>([]);
   const [emails, setEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [gapiReady, setGapiReady] = useState(false);
 
   const handleToken = useCallback(async (accessToken: string) => {
     localStorage.setItem('aura_gapi_token', accessToken);
     (window as any).gapiAccessToken = accessToken;
     setUser({ access_token: accessToken });
-    await fetchData(accessToken);
+    try {
+      await fetchData(accessToken);
+    } catch (e) {
+      console.error("Failed to fetch data with token:", e);
+      localStorage.removeItem('aura_gapi_token');
+      setUser(null);
+    }
   }, []);
 
   const fetchData = useCallback(async (accessToken: string) => {
     setLoading(true);
-    gapi.client.setToken({ access_token: accessToken });
-    (window as any).gapiAccessToken = accessToken;
-
     try {
+      gapi.client.setToken({ access_token: accessToken });
+      (window as any).gapiAccessToken = accessToken;
+
       await gapi.client.load('calendar', 'v3');
       const calendarResponse = await (gapi.client as any).calendar.events.list({
         calendarId: 'primary',
@@ -63,19 +72,76 @@ export const GoogleConnect: React.FC = () => {
 
   useEffect(() => {
     gapi.load('client:auth2', () => {
-      gapi.client.init({ clientId: CLIENT_ID, scope: SCOPES });
+      gapi.client.init({
+        clientId: CLIENT_ID,
+        scope: SCOPES,
+        discoveryDocs: [
+          'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+          'https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest'
+        ]
+      }).then(() => {
+        setGapiReady(true);
+
+        const authInstance = gapi.auth2.getAuthInstance();
+        if (authInstance && authInstance.isSignedIn.get()) {
+          const token = authInstance.currentUser.get().getAuthResponse().access_token;
+          handleToken(token);
+        }
+      }).catch((e: any) => {
+        console.error("gapi.client.init failed:", e);
+        setGapiReady(true);
+      });
     });
 
     const stored = localStorage.getItem('aura_gapi_token');
     if (stored) {
       handleToken(stored);
     }
-  }, [handleToken]);
+  }, []);
 
   const login = async () => {
+    if (!gapiReady) {
+      toast.error('Google API is still loading. Please wait...');
+      return;
+    }
+
+    // On native (Capacitor), use Browser.open for OAuth
+    if (Capacitor.isNativePlatform()) {
+      loginNative();
+      return;
+    }
+
+    // On web, use gapi.auth2 popup flow
+    try {
+      const authInstance = gapi.auth2.getAuthInstance();
+      if (!authInstance) {
+        toast.error('Google Auth not initialized. Please refresh.');
+        return;
+      }
+
+      const googleUser = await authInstance.signIn({
+        ux_mode: 'popup',
+        prompt: 'select_account'
+      });
+
+      const token = googleUser.getAuthResponse().access_token;
+      if (token) {
+        handleToken(token);
+        toast.success('Google account connected!');
+      }
+    } catch (err: any) {
+      if (err?.error === 'popup_closed_by_user' || err?.type === 'popup_closed') {
+        return;
+      }
+      console.error("Web login failed:", err);
+      toast.error('Login failed. Please try again.');
+    }
+  };
+
+  const loginNative = async () => {
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth` +
       `?client_id=${CLIENT_ID}` +
-      `&redirect_uri=${encodeURIComponent('https://localhost')}` +
+      `&redirect_uri=${encodeURIComponent('com.aura.app://')}` +
       `&response_type=token` +
       `&scope=${encodeURIComponent(SCOPES)}` +
       `&prompt=select_account`;
@@ -89,9 +155,9 @@ export const GoogleConnect: React.FC = () => {
 
       let tokenHandled = false;
 
-      const urlHandle = App.addListener('appUrlOpen', async (event: any) => {
+      const urlHandle = await App.addListener('appUrlOpen', async (event: any) => {
         const url = event.url;
-        if (!tokenHandled && url && url.includes('access_token')) {
+        if (!tokenHandled && url && (url.includes('access_token') || url.includes('#'))) {
           const hashIndex = url.indexOf('#');
           if (hashIndex !== -1) {
             const hashPart = url.substring(hashIndex + 1);
@@ -101,22 +167,22 @@ export const GoogleConnect: React.FC = () => {
               tokenHandled = true;
               await Browser.close();
               handleToken(token);
+              toast.success('Google account connected!');
             }
           }
         }
       });
 
-      const browserHandle = Browser.addListener('browserFinished', async () => {
+      Browser.addListener('browserFinished', async () => {
         if (!tokenHandled) {
           tokenHandled = true;
-          await urlHandle.remove();
+          try { await urlHandle.remove(); } catch (_) {}
           const stored = localStorage.getItem('aura_gapi_token');
           if (stored) handleToken(stored);
         }
       });
 
       await Browser.open({ url: authUrl, width: 600, height: 700 });
-
     } catch (_e) {
       window.location.href = authUrl;
     }
@@ -129,12 +195,16 @@ export const GoogleConnect: React.FC = () => {
     setEvents([]);
     setEmails([]);
     gapi.client.setToken(null);
+    try {
+      const authInstance = gapi.auth2.getAuthInstance();
+      if (authInstance) authInstance.signOut();
+    } catch (_) {}
   };
 
   if (!user) {
     return (
-      <button onClick={login} className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '16px' }}>
-        <CalendarIcon size={18} /> Connect Google Account
+      <button onClick={login} className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '16px' }} disabled={!gapiReady}>
+        <CalendarIcon size={18} /> {gapiReady ? 'Connect Google Account' : 'Loading Google API...'}
       </button>
     );
   }
