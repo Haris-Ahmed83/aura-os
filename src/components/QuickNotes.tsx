@@ -76,6 +76,8 @@ const QuickNotes: React.FC<QuickNotesProps> = ({ notes: initialNotes, onSave }) 
     };
   }, []);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const sortedNotes = useMemo(() => {
     return [...notes].sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -199,6 +201,7 @@ const QuickNotes: React.FC<QuickNotesProps> = ({ notes: initialNotes, onSave }) 
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '2px',
+                  position: 'relative',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -207,9 +210,49 @@ const QuickNotes: React.FC<QuickNotesProps> = ({ notes: initialNotes, onSave }) 
                     fontSize: '13px', fontWeight: 600,
                     color: selectedId === note.id ? 'var(--accent)' : 'var(--text-1)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    flex: 1,
                   }}>
                     {note.title || 'Untitled'}
                   </span>
+                  {deletingId === note.id ? (
+                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteNote(note.id); setDeletingId(null); }}
+                        style={{
+                          background: 'var(--accent-rose, #f43f5e)', border: 'none', borderRadius: '4px',
+                          color: '#fff', fontSize: '10px', fontWeight: 600, cursor: 'pointer',
+                          padding: '2px 6px', lineHeight: '14px',
+                        }}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDeletingId(null); }}
+                        style={{
+                          background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px',
+                          color: 'var(--text-3)', fontSize: '10px', cursor: 'pointer',
+                          padding: '2px 6px', lineHeight: '14px',
+                        }}
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeletingId(note.id); }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--text-3)', padding: '2px', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                        borderRadius: '4px', opacity: 0.5, transition: 'opacity 0.15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.5')}
+                      title="Delete note"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
                 <span style={{ fontSize: '11px', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {note.content ? note.content.substring(0, 60).replace(/[#*\-\`]/g, '') : 'Empty note'}
