@@ -522,14 +522,44 @@ function App() {
     setAiPromptMsg(prompts[Math.floor(Math.random() * prompts.length)]);
   };
 
-  // Voice to Text for Journal
-  const handleJournalVoice = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { return; }
-    
+  // Voice to Text for Journal — native plugin on mobile, Web Speech API on web
+  const handleJournalVoice = async () => {
     if (isJournalListening) {
-      journalRecognitionRef.current?.stop();
+      journalRecognitionRef.current?.stop?.();
+      try {
+        const { SpeechRecognition: CapSpeech } = await import('@capgo/capacitor-speech-recognition');
+        await CapSpeech.stop();
+      } catch (_) {}
       setIsJournalListening(false);
+      return;
+    }
+
+    // Try native Capacitor plugin first
+    try {
+      const { SpeechRecognition: CapSpeech } = await import('@capgo/capacitor-speech-recognition');
+      await CapSpeech.requestPermissions();
+      setIsJournalListening(true);
+      const result = await CapSpeech.start({
+        language: 'en-US',
+        maxResults: 5,
+        prompt: 'Speak for your journal...',
+        partialResults: true,
+        popup: false,
+      });
+      if (result && result.matches && result.matches.length > 0) {
+        const transcript = result.matches.join(' ');
+        setNewJournal(prev => prev ? prev + ' ' + transcript : transcript);
+      }
+      setIsJournalListening(false);
+      return;
+    } catch (e) {
+      console.warn('Native journal speech failed:', e);
+    }
+
+    // Fallback: Web Speech API
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Speech recognition not available.');
       return;
     }
 
@@ -605,14 +635,44 @@ function App() {
     setTimeout(() => setSettingsSaved(false), 2000);
   };
 
-  // Voice Memo Handler
-  const handleVoiceMemo = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { return; }
-    
+  // Voice Memo Handler — uses native plugin on mobile, Web Speech API on web
+  const handleVoiceMemo = async () => {
     if (isListening) {
-      recognitionRef.current?.stop();
+      recognitionRef.current?.stop?.();
+      try {
+        const { SpeechRecognition: CapSpeech } = await import('@capgo/capacitor-speech-recognition');
+        await CapSpeech.stop();
+      } catch (_) {}
       setIsListening(false);
+      return;
+    }
+
+    // Try native Capacitor plugin first (works on Android/iOS)
+    try {
+      const { SpeechRecognition: CapSpeech } = await import('@capgo/capacitor-speech-recognition');
+      await CapSpeech.requestPermissions();
+      const result = await CapSpeech.start({
+        language: 'en-US',
+        maxResults: 1,
+        prompt: 'Speak your idea...',
+        partialResults: false,
+        popup: false,
+      });
+      if (result && result.matches && result.matches.length > 0) {
+        const transcript = result.matches[0];
+        setVoiceTranscript(transcript);
+        setTasks(prev => ({ ...prev, todo: [{ id: Date.now().toString(), title: `🎤 ${transcript}`, type: 'Idea', color: 'blue' }, ...prev.todo] }));
+        toast.success('Idea captured from voice!');
+      }
+      return;
+    } catch (e) {
+      console.warn('Native speech failed, trying Web Speech API:', e);
+    }
+
+    // Fallback: Web Speech API (works on Chrome desktop)
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Speech recognition not available. Type your idea instead.');
       return;
     }
 
@@ -643,9 +703,7 @@ function App() {
     toast.success('Idea added from voice memo!');
   };
 
-  const voiceSupported = typeof window !== 'undefined' && (
-    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-  );
+  const voiceSupported = typeof window !== 'undefined';
 
   // AI Auto-Schedule: take "New Ideas" tasks and schedule them into next 7 days
   const handleAutoSchedule = async () => {
@@ -1896,9 +1954,7 @@ Always prefer calling functions over just talking about them.`,
                       <Mic size={18} color="var(--accent-rose)" /> Quick Idea Capture
                     </h3>
                     <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                      {voiceSupported
-                        ? 'Speak or type and your idea will instantly appear in the Idea Board.'
-                        : 'Type your idea below to add it to the Idea Board.'}
+                      Tap the mic to speak or type your idea below.
                     </p>
                       {voiceTranscript && (
                       <div style={{ background: 'rgba(255,255,255,0.05)', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', marginBottom: '14px', borderLeft: '3px solid var(--accent-blue)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1906,33 +1962,30 @@ Always prefer calling functions over just talking about them.`,
                         <button onClick={() => setVoiceTranscript('')} style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: '2px 6px', fontSize: '12px' }}>✕</button>
                       </div>
                     )}
-                    {voiceSupported ? (
-                      <motion.button
-                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleVoiceMemo}
-                        className={isListening ? 'btn-primary' : 'btn-secondary'}
-                        style={{ width: '100%', justifyContent: 'center', background: isListening ? 'rgba(244,63,94,0.2)' : undefined, borderColor: isListening ? 'var(--accent-rose)' : undefined }}
-                      >
-                        {isListening ? <><MicOff size={16} /> Stop Listening...</> : <><Mic size={16} /> Start Voice Memo</>}
+                    <motion.button
+                      whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleVoiceMemo}
+                      className={isListening ? 'btn-primary' : 'btn-secondary'}
+                      style={{ width: '100%', justifyContent: 'center', background: isListening ? 'rgba(244,63,94,0.2)' : undefined, borderColor: isListening ? 'var(--accent-rose)' : undefined, marginBottom: '10px' }}
+                    >
+                      {isListening ? <><MicOff size={16} /> Stop Listening...</> : <><Mic size={16} /> Start Voice Memo</>}
+                    </motion.button>
+                    <form onSubmit={(e) => { e.preventDefault(); handleVoiceTextSubmit(); }} style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text"
+                        value={voiceTextInput}
+                        onChange={(e) => setVoiceTextInput(e.target.value)}
+                        placeholder="Or type your idea..."
+                        style={{
+                          flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          color: 'white', padding: '10px 14px', borderRadius: '8px', outline: 'none',
+                          fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                        }}
+                      />
+                      <motion.button type="submit" whileTap={{ scale: 0.95 }} className="btn-primary" style={{ padding: '10px 16px' }}>
+                        <Plus size={16} /> Add
                       </motion.button>
-                    ) : (
-                      <form onSubmit={(e) => { e.preventDefault(); handleVoiceTextSubmit(); }} style={{ display: 'flex', gap: '8px' }}>
-                        <input
-                          type="text"
-                          value={voiceTextInput}
-                          onChange={(e) => setVoiceTextInput(e.target.value)}
-                          placeholder="Type your idea..."
-                          style={{
-                            flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-                            color: 'white', padding: '10px 14px', borderRadius: '8px', outline: 'none',
-                            fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
-                          }}
-                        />
-                        <motion.button type="submit" whileTap={{ scale: 0.95 }} className="btn-primary" style={{ padding: '10px 16px' }}>
-                          <Plus size={16} /> Add
-                        </motion.button>
-                      </form>
-                    )}
+                    </form>
                   </div>
 
                   {/* AI Auto-Schedule Widget */}
