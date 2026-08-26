@@ -13,7 +13,7 @@
     "@capacitor/app": "^8.0.0",
     "@capacitor/browser": "^8.0.0",
     "@capacitor/filesystem": "^8.0.0",
-    "@capgo/capacitor-updater": "^8.0.0",
+    "@capgo/capacitor-speech-recognition": "^8.1.11",
     "@google/generative-ai": "^0.24.1",
     "@hello-pangea/dnd": "^18.0.1",
     "@react-oauth/google": "^0.13.5",
