@@ -6,7 +6,7 @@ import {
   Settings as SettingsIcon, 
   Search, 
   Plus,
-  Bell,
+  // Bell removed — NotificationCenter handles bell icon
   Sparkles,
   Command,
   CheckCircle2,
@@ -40,8 +40,7 @@ import {
   Target,
   FileText,
   Lock,
-  Hash,
-  ListTodo,
+  FileText,
   TrendingUp
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -218,7 +217,7 @@ function App() {
 
   // AI Assistant Chat State
   const [aiChatMessages, setAiChatMessages] = useState<{ sender: 'user' | 'assistant'; text: string }[]>([
-    { sender: 'assistant', text: `Hi Buddy..!` }
+    { sender: 'assistant', text: `Hi ${settings.displayName || 'Haris'}! How can I help you today?` }
   ]);
   const [aiChatInput, setAiChatInput] = useState('');
   
@@ -256,6 +255,7 @@ function App() {
   // Analytics: Pomodoro State
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60);
   const [pomodoroRunning, setPomodoroRunning] = useState(false);
+  const [pomodoroDuration, setPomodoroDuration] = useState(25); // minutes
   const pomodoroRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Voice Memo State
@@ -287,7 +287,6 @@ function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pomodoroSessions, setPomodoroSessions] = useState<PomodoroSession[]>([]);
   const [isLocked, setIsLocked] = useState(true);
-  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -690,6 +689,11 @@ function App() {
     }
 
     setScheduleEvents(prev => [...prev, ...newEvents]);
+    setTasks(prev => ({
+      ...prev,
+      todo: [],
+      inProgress: [...prev.inProgress, ...todoTasks.map(t => ({ ...t, type: 'Active' as const, color: 'purple' as const }))],
+    }));
     setAutoScheduling(false);
     
     const msg = `${scheduledCount} tasks auto-scheduled${accessToken ? ' & synced to Google Calendar!' : ' to your local Schedule!'}`;
@@ -741,9 +745,13 @@ function App() {
   // Get upcoming events (next 7 days)
   const getUpcomingEvents = () => {
     const now = new Date();
-    return scheduleEvents
+    return [...scheduleEvents]
       .filter(ev => new Date(ev.date) >= new Date(now.toISOString().split('T')[0]))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .sort((a, b) => {
+        const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return (a.time || '').localeCompare(b.time || '');
+      })
       .slice(0, 3);
   };
 
@@ -1055,7 +1063,7 @@ function App() {
         const totalSpent = expenses.filter(e => e.recurring || e.date.startsWith(currentMonthStr)).reduce((s, e) => s + e.amount, 0);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-3.6-flash",
+          model: "gemini-2.0-flash",
           generationConfig: {
             maxOutputTokens: 300,
             temperature: 0.7
@@ -1760,9 +1768,6 @@ Always prefer calling functions over just talking about them.`,
                         <h2 style={{ margin: 0 }}>{settings.displayName}! 👋</h2>
                       </div>
                     </div>
-                    <button className="icon-btn" style={{ width: '40px', height: '40px', flexShrink: 0 }}>
-                      <Bell size={18} color="var(--accent)" />
-                    </button>
                   </div>
 
                   {/* Search bar — like image */}
@@ -1896,9 +1901,10 @@ Always prefer calling functions over just talking about them.`,
                         ? 'Speak or type and your idea will instantly appear in the Idea Board.'
                         : 'Type your idea below to add it to the Idea Board.'}
                     </p>
-                    {voiceTranscript && (
-                      <div style={{ background: 'rgba(255,255,255,0.05)', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', marginBottom: '14px', borderLeft: '3px solid var(--accent-blue)' }}>
-                        🎤 "{voiceTranscript}"
+                      {voiceTranscript && (
+                      <div style={{ background: 'rgba(255,255,255,0.05)', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', marginBottom: '14px', borderLeft: '3px solid var(--accent-blue)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>🎤 "{voiceTranscript}"</span>
+                        <button onClick={() => setVoiceTranscript('')} style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: '2px 6px', fontSize: '12px' }}>✕</button>
                       </div>
                     )}
                     {voiceSupported ? (
@@ -2091,8 +2097,12 @@ Always prefer calling functions over just talking about them.`,
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {scheduleEvents
-                      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                    {[...scheduleEvents]
+                      .sort((a, b) => {
+                        const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+                        if (dateDiff !== 0) return dateDiff;
+                        return (a.time || '').localeCompare(b.time || '');
+                      })
                       .map(event => (
                       <motion.div key={event.id} layout className="schedule-card glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div style={{ width: '4px', height: '40px', borderRadius: '4px', background: eventTypeColors[event.type] }} />
@@ -2343,8 +2353,8 @@ Always prefer calling functions over just talking about them.`,
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Delete all tasks, events, journal entries, and reset settings</p>
                     </div>
                     <button className="btn-secondary" style={{ color: 'var(--accent-rose)', borderColor: 'rgba(244,63,94,0.3)' }} onClick={() => {
-                      if (confirm('Are you sure? This will delete ALL your data permanently.')) {
-                        localStorage.clear();
+                        if (confirm('Are you sure? This will delete ALL your data permanently.')) {
+                        Object.keys(localStorage).filter(k => k.startsWith('aura_')).forEach(k => localStorage.removeItem(k));
                         window.location.reload();
                       }
                     }}>
@@ -2402,8 +2412,8 @@ Always prefer calling functions over just talking about them.`,
                       const dateStr = d.toISOString().split('T')[0];
                       const hasJournal = journalEntries.some(j => j.date.startsWith(dateStr));
                       const hasEvent = scheduleEvents.some(e => e.date === dateStr);
-                      const hasTask = tasks.completed.length > 0 && i % 3 === 0; // simulated
-                      const intensity = (hasJournal ? 1 : 0) + (hasEvent ? 1 : 0) + (hasTask ? 1 : 0);
+                      const hasPomodoro = pomodoroSessions.some(s => s.startTime.startsWith(dateStr));
+                      const intensity = (hasJournal ? 1 : 0) + (hasEvent ? 1 : 0) + (hasPomodoro ? 1 : 0);
                       const colors = ['rgba(255,255,255,0.05)', 'rgba(59,130,246,0.3)', 'rgba(59,130,246,0.6)', 'rgba(59,130,246,1)'];
                       return (
                         <div key={i} title={dateStr} style={{ width: '100%', paddingBottom: '100%', borderRadius: '2px', background: colors[intensity], cursor: 'pointer', transition: 'transform 0.15s' }} />
@@ -2423,7 +2433,7 @@ Always prefer calling functions over just talking about them.`,
                 <div className="glass-panel" style={{ padding: '24px' }}>
                   <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}><Clock size={18} /> Focus Timer (Pomodoro)</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
-                    <div style={{ fontSize: '5rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-2px', color: pomodoroRunning ? 'var(--accent-blue)' : 'var(--text-primary)', transition: 'color 0.3s' }}>
+                    <div style={{ fontSize: '5rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-2px', color: pomodoroRunning ? 'var(--accent-blue)' : 'var(--text-1)', transition: 'color 0.3s' }}>
                       {String(Math.floor(pomodoroTime / 60)).padStart(2, '0')}:{String(pomodoroTime % 60).padStart(2, '0')}
                     </div>
                     <div style={{ display: 'flex', gap: '12px' }}>
@@ -2435,10 +2445,16 @@ Always prefer calling functions over just talking about them.`,
                           setPomodoroRunning(true);
                           pomodoroRef.current = setInterval(() => {
                             setPomodoroTime(prev => {
-                              if (prev <= 1) { if (pomodoroRef.current) clearInterval(pomodoroRef.current); setPomodoroRunning(false);
-                                setPomodoroSessions(prev => [...prev, { id: Date.now().toString(), startTime: new Date(Date.now() - 25 * 60 * 1000).toISOString(), duration: 25 * 60, completed: true }]);
-                                toast.success('Pomodoro session completed!');
-                                return 25 * 60; }
+                              if (prev <= 1) {
+                                if (pomodoroRef.current) clearInterval(pomodoroRef.current);
+                                setPomodoroRunning(false);
+                                // Record session outside state updater (React-safe)
+                                setTimeout(() => {
+                                  setPomodoroSessions(p => [...p, { id: Date.now().toString(), startTime: new Date(Date.now() - pomodoroDuration * 60 * 1000).toISOString(), duration: pomodoroDuration * 60, completed: true }]);
+                                  toast.success('Pomodoro session completed!');
+                                }, 0);
+                                return pomodoroDuration * 60;
+                              }
                               return prev - 1;
                             });
                           }, 1000);
@@ -2450,13 +2466,14 @@ Always prefer calling functions over just talking about them.`,
                         if (pomodoroRef.current) clearInterval(pomodoroRef.current);
                         setPomodoroRunning(false);
                         setPomodoroTime(25 * 60);
+                        setPomodoroDuration(25);
                       }}>
                         ↺ Reset
                       </motion.button>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {[5, 15, 25, 45].map(mins => (
-                        <button key={mins} onClick={() => { if (pomodoroRef.current) clearInterval(pomodoroRef.current); setPomodoroRunning(false); setPomodoroTime(mins * 60); }} style={{ padding: '6px 14px', borderRadius: '20px', border: pomodoroTime === mins * 60 ? '1px solid var(--accent-blue)' : '1px solid rgba(255,255,255,0.1)', background: pomodoroTime === mins * 60 ? 'rgba(59,130,246,0.15)' : 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                        <button key={mins} onClick={() => { if (pomodoroRef.current) clearInterval(pomodoroRef.current); setPomodoroRunning(false); setPomodoroTime(mins * 60); setPomodoroDuration(mins); }} style={{ padding: '6px 14px', borderRadius: '20px', border: pomodoroDuration === mins ? '1px solid var(--accent-blue)' : '1px solid rgba(255,255,255,0.1)', background: pomodoroDuration === mins ? 'rgba(59,130,246,0.15)' : 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>
                           {mins}m
                         </button>
                       ))}
@@ -2538,8 +2555,8 @@ Always prefer calling functions over just talking about them.`,
                             <span>Rs</span>
                             <input
                               type="number"
-                              value={totalFunds || ''}
-                              onChange={(e) => setTotalFunds(Number(e.target.value))}
+                              value={totalFunds}
+                              onChange={(e) => setTotalFunds(Math.max(0, Number(e.target.value) || 0))}
                               placeholder="0"
                             />
                           </div>
@@ -2573,8 +2590,8 @@ Always prefer calling functions over just talking about them.`,
                             <span className="finance-stat-prefix">Rs</span>
                             <input
                               type="number"
-                              value={monthlyIncome || ''}
-                              onChange={(e) => setMonthlyIncome(Number(e.target.value))}
+                              value={monthlyIncome}
+                              onChange={(e) => setMonthlyIncome(Math.max(0, Number(e.target.value) || 0))}
                               placeholder="0"
                               style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-1)', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', fontVariantNumeric: 'tabular-nums', width: '120px', padding: 0, fontFamily: 'inherit' }}
                             />
@@ -2738,15 +2755,14 @@ Always prefer calling functions over just talking about them.`,
                     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setShowAddFunds(null); setAddFundsAmount(''); }}>
                       <motion.div className="modal-content" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()}>
                         <h3 style={{ marginBottom: '24px', fontSize: '1.2rem' }}>Add Funds to Goal</h3>
-                        <form onSubmit={e => {
+                         <form onSubmit={e => {
                           e.preventDefault();
-                          if (!addFundsAmount) return;
                           const addAmt = parseFloat(addFundsAmount);
+                          if (!addAmt || addAmt <= 0 || !isFinite(addAmt)) { toast.error('Enter a valid amount'); return; }
                           setSavingsGoals(prev => prev.map(g => g.id === showAddFunds ? { ...g, savedAmount: g.savedAmount + addAmt } : g));
-                          setTotalFunds(prev => Math.max(0, prev - addAmt));
                           setAddFundsAmount('');
                           setShowAddFunds(null);
-                          toast.success(`Rs ${addAmt} added to Goal Vault!`);
+                          toast.success(`Rs ${addAmt.toLocaleString()} added to Goal Vault!`);
                         }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                           <input className="form-input" type="number" placeholder="Amount to add (Rs)" value={addFundsAmount} onChange={e => setAddFundsAmount(e.target.value)} required />
                           <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
@@ -2821,19 +2837,19 @@ Always prefer calling functions over just talking about them.`,
                 {/* Add / Edit Expense Modal */}
                 <AnimatePresence>
                   {showAddExpense && (
-                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddExpense(false)}>
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setShowAddExpense(false); setEditExpenseId(null); setNewExpense({ name: '', amount: '', category: 'other', recurring: false }); }}>
                       <motion.div className="modal-content" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()}>
                         <h3 style={{ marginBottom: '24px', fontSize: '1.2rem' }}>{editExpenseId ? 'Edit Expense' : 'Add Expense'}</h3>
                         <form onSubmit={e => {
                           e.preventDefault();
                           if (!newExpense.name || !newExpense.amount) return;
+                          const amt = parseFloat(newExpense.amount);
+                          if (!amt || amt <= 0 || !isFinite(amt)) { toast.error('Enter a valid amount'); return; }
                           
                           if (editExpenseId) {
-                            setExpenses(prev => prev.map(exp => exp.id === editExpenseId ? { ...exp, name: newExpense.name, amount: parseFloat(newExpense.amount), category: newExpense.category, recurring: newExpense.recurring } : exp));
+                            setExpenses(prev => prev.map(exp => exp.id === editExpenseId ? { ...exp, name: newExpense.name, amount: amt, category: newExpense.category, recurring: newExpense.recurring } : exp));
                           } else {
-                            const amt = parseFloat(newExpense.amount);
                             setExpenses(prev => [...prev, { id: Date.now().toString(), name: newExpense.name, amount: amt, category: newExpense.category, date: new Date().toISOString().split('T')[0], recurring: newExpense.recurring }]);
-                            setTotalFunds(prev => Math.max(0, prev - amt));
                           }
                           
                           setNewExpense({ name: '', amount: '', category: 'other', recurring: false });
